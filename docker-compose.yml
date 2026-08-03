@@ -1,0 +1,26 @@
+services:
+  cloud-server:
+    build: .
+    image: athlete-biometrics-cloud-server:latest
+    container_name: athlete-biometrics-cloud-server
+    ports:
+      - "8000:8000"
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+      MOCK_DB_PATH: /data/mock_db.json
+      CLOUD_API_KEY: ${CLOUD_API_KEY:-dev-only-insecure-change-me}
+      MAX_PACKET_AGE_SECONDS: 300
+    volumes:
+      # Persist the mock database outside the container filesystem.
+      - biometrics_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  biometrics_data:

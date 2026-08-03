@@ -23,6 +23,7 @@ Pipeline Steps (per tick):
 """
 
 from __future__ import annotations
+
 import time
 from typing import Any, Dict
 
@@ -119,7 +120,7 @@ def assert_no_plaintext_leak(schema_payload: Dict[str, Any], ciphertext_hex: str
         "injury_risk": schema_payload["injury_risk"],
     }
     for field_name, field_value in numeric_checks.items():
-        marker = f'"{field_name}": {field_value}'.encode("utf-8")
+        marker = f'"{field_name}": {field_value}'.encode()
         assert marker not in ciphertext_bytes, (
             f"SECURITY FAILURE: '{field_name}' value leaked into ciphertext!"
         )

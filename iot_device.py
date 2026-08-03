@@ -19,9 +19,10 @@ handed to the gateway for transmission.
 """
 
 from __future__ import annotations
+
 import random
 from datetime import datetime, timezone
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 class IoTDeviceMock:

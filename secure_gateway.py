@@ -4,11 +4,13 @@ Week 1: Core Encryption Module & Secure Edge Gateway
 """
 
 from __future__ import annotations
+
 import calendar
 import json
 import os
 import time
-from typing import Dict, Any, Optional, Set, Union
+from typing import Any, Dict, Optional, Set, Union
+
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from biometric_schema import validate_biometric_payload

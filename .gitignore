@@ -16,3 +16,14 @@ htmlcov/
 # IDE files
 .vscode/
 .idea/
+
+# Environment configuration (never commit real secrets)
+.env
+
+# Runtime mock database
+mock_db.json
+mock_db_test_week3.json
+
+# Ruff / mypy caches
+.ruff_cache/
+.mypy_cache/
