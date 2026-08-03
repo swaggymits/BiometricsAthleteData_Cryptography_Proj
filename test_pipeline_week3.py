@@ -92,7 +92,11 @@ class TestWeek3Pipeline(unittest.TestCase):
         # 4. GET stored ciphertexts and assert no plaintext biometric leakage.
         get_response = self.client.get("/api/v1/telemetry/stored-ciphertexts")
         self.assertEqual(get_response.status_code, 200)
-        stored_records = get_response.json()
+        get_body = get_response.json()
+        # Response is now paginated: {"total": N, "offset": 0, "limit": 50, "records": [...]}
+        self.assertIn("records", get_body)
+        self.assertIn("total", get_body)
+        stored_records = get_body["records"]
         stored_text = json.dumps(stored_records)
 
         metrics = raw_reading["metrics"]
@@ -125,6 +129,8 @@ class TestWeek3Pipeline(unittest.TestCase):
             json.dumps(schema_payload), stored_text,
             "SECURITY FAILURE: raw schema payload found in stored ciphertexts response!"
         )
+        # Server must have injected a received_at timestamp on the stored record.
+        self.assertIn("received_at", found, "stored record is missing server-assigned 'received_at'.")
 
         # 5. POST to authorize-decrypt with the correct key and verify recovery.
         decrypt_response = self.client.post(
@@ -202,6 +208,72 @@ class TestWeek3Pipeline(unittest.TestCase):
         """The public proof-of-encryption endpoint must remain unauthenticated."""
         response = self.client.get("/api/v1/telemetry/stored-ciphertexts")
         self.assertEqual(response.status_code, 200)
+
+    def test_stored_ciphertexts_pagination_fields(self) -> None:
+        """Paginated response must contain total/offset/limit/records fields."""
+        response = self.client.get("/api/v1/telemetry/stored-ciphertexts?offset=0&limit=10")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        for key in ("total", "offset", "limit", "records"):
+            self.assertIn(key, body)
+        self.assertEqual(body["offset"], 0)
+        self.assertEqual(body["limit"], 10)
+        self.assertIsInstance(body["records"], list)
+
+    def test_stored_ciphertexts_pagination_offset(self) -> None:
+        """An offset beyond the total number of records must return an empty records list."""
+        response = self.client.get("/api/v1/telemetry/stored-ciphertexts?offset=99999&limit=10")
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["records"], [])
+
+    def test_delete_record_requires_api_key(self) -> None:
+        """DELETE without X-API-Key must be rejected with 401."""
+        response = self.client.delete("/api/v1/telemetry/records/0")
+        self.assertEqual(response.status_code, 401)
+
+    def test_delete_record_out_of_range_returns_404(self) -> None:
+        """DELETE with an index beyond the stored count must return 404."""
+        response = self.client.delete(
+            "/api/v1/telemetry/records/99999", headers=API_KEY_HEADERS
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_delete_record_success(self) -> None:
+        """Ingesting then deleting a record must reduce the stored count by one."""
+        # Ingest a fresh record specifically for this deletion test.
+        raw_reading = self.device.generate_biometrics()
+        schema_payload = adapt_to_schema(raw_reading)
+        encrypted_packet = self.gateway.encrypt_data(
+            schema_payload,
+            device_id=self.device.device_id,
+            player_id=self.device.player_id,
+        )
+        ingest_response = self.client.post(
+            "/api/v1/telemetry/ingest",
+            headers=API_KEY_HEADERS,
+            json={
+                "gateway_id": encrypted_packet["gateway_id"],
+                "device_id": encrypted_packet["device_id"],
+                "player_id": encrypted_packet["player_id"],
+                "sent_at": encrypted_packet["sent_at"],
+                "nonce": encrypted_packet["nonce"],
+                "ciphertext": encrypted_packet["ciphertext"],
+            },
+        )
+        self.assertEqual(ingest_response.status_code, 201)
+        count_before = ingest_response.json()["stored_record_count"]
+
+        # Delete the last record (the one we just ingested).
+        delete_response = self.client.delete(
+            f"/api/v1/telemetry/records/{count_before - 1}",
+            headers=API_KEY_HEADERS,
+        )
+        self.assertEqual(delete_response.status_code, 200)
+        delete_body = delete_response.json()
+        self.assertEqual(delete_body["status"], "success")
+        self.assertEqual(delete_body["remaining_record_count"], count_before - 1)
+        self.assertIn("deleted_record", delete_body)
 
     def test_health_check_endpoint(self) -> None:
         response = self.client.get("/health")

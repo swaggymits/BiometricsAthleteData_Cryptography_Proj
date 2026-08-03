@@ -11,15 +11,21 @@ Security & Compliance Notes (GDPR / CIA Availability):
   is strictly validated by Pydantic models to accept nothing but hex-encoded
   `nonce`/`ciphertext` plus routing metadata (data minimization by design —
   GDPR Art. 5(1)(c): no more data than necessary is ever accepted or stored).
+- Rate limiting on the ingestion endpoint (default: 60 requests / minute per
+  client IP) defends against bulk-flood / denial-of-service attacks that would
+  exhaust disk space or CPU on the storage tier.
 - `GET /api/v1/telemetry/stored-ciphertexts` intentionally requires NO special
   authorization, because it is designed to be safely public: it proves that
   even a stolen database dump or an unauthorized third-party API read yields
   only authenticated ciphertext ("encrypted noise"), never raw biometrics —
-  directly mitigating tactical performance espionage.
+  directly mitigating tactical performance espionage. Supports `offset`/`limit`
+  query parameters for pagination so large databases stay responsive.
 - `POST /api/v1/telemetry/authorize-decrypt` is the ONLY path where plaintext
   is ever reconstructed, and it requires the caller to supply the correct
   pre-shared AES key. This models a real "authorized analyst / coaching
   staff" decryption workflow, separate from the untrusted storage tier.
+- `DELETE /api/v1/telemetry/records/{index}` provides GDPR Art. 17 "right to
+  erasure" for an individual stored record, protected by the shared API key.
 - Running under `uvicorn` (ASGI) keeps the ingestion endpoint responsive and
   horizontally scalable, supporting the Availability leg of the CIA triad for
   continuous, real-time telemetry ingestion during a live match.
@@ -28,10 +34,12 @@ Security & Compliance Notes (GDPR / CIA Availability):
 from __future__ import annotations
 
 import binascii
+import collections
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from cloud_server import CloudServer
@@ -41,6 +49,46 @@ from secure_gateway import SecureGateway
 
 configure_logging()
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Simple in-process sliding-window rate limiter for the ingestion endpoint.
+# Tracks request timestamps per client IP; rejects clients that exceed
+# INGEST_RATE_LIMIT requests within INGEST_RATE_WINDOW_SECONDS.
+# ---------------------------------------------------------------------------
+_INGEST_RATE_LIMIT: int = 60          # max requests per window
+_INGEST_RATE_WINDOW_SECONDS: float = 60.0  # rolling window duration
+
+_rate_limit_store: Dict[str, collections.deque] = {}
+_rate_limit_lock = threading.Lock()
+
+
+def _check_ingest_rate_limit(client_ip: str) -> None:
+    """
+    Enforce a sliding-window rate limit for a given ``client_ip``.
+
+    Raises:
+        HTTPException: 429 Too Many Requests if the caller has exceeded
+                       ``_INGEST_RATE_LIMIT`` requests in the last
+                       ``_INGEST_RATE_WINDOW_SECONDS`` seconds.
+    """
+    now = time.monotonic()
+    with _rate_limit_lock:
+        if client_ip not in _rate_limit_store:
+            _rate_limit_store[client_ip] = collections.deque()
+        window: collections.deque = _rate_limit_store[client_ip]
+        # Evict timestamps that have fallen outside the sliding window.
+        while window and now - window[0] > _INGEST_RATE_WINDOW_SECONDS:
+            window.popleft()
+        if len(window) >= _INGEST_RATE_LIMIT:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    f"Rate limit exceeded: maximum {_INGEST_RATE_LIMIT} ingestion "
+                    f"requests per {_INGEST_RATE_WINDOW_SECONDS:.0f}s window."
+                ),
+            )
+        window.append(now)
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -133,6 +181,24 @@ class TelemetryIngestResponse(BaseModel):
     stored_record_count: int
 
 
+class StoredCiphertextsResponse(BaseModel):
+    """Paginated response for the stored-ciphertexts listing endpoint."""
+
+    total: int
+    offset: int
+    limit: int
+    records: List[Dict[str, Any]]
+
+
+class DeleteRecordResponse(BaseModel):
+    """Confirmation response returned after successfully deleting a record."""
+
+    status: str
+    message: str
+    deleted_record: Dict[str, Any]
+    remaining_record_count: int
+
+
 class AuthorizeDecryptRequest(BaseModel):
     """
     Request contract for authorized decryption of a previously ingested (or
@@ -193,7 +259,10 @@ def health_check() -> HealthResponse:
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_api_key)],
 )
-def ingest_telemetry(payload: TelemetryIngestRequest) -> TelemetryIngestResponse:
+def ingest_telemetry(
+    request: Request,
+    payload: TelemetryIngestRequest,
+) -> TelemetryIngestResponse:
     """
     Ingest a single hex-encoded encrypted biometric telemetry packet from an
     edge `SecureGateway` and persist it to `mock_db.json`.
@@ -201,10 +270,16 @@ def ingest_telemetry(payload: TelemetryIngestRequest) -> TelemetryIngestResponse
     Requires a valid `X-API-Key` header (edge gateways are provisioned with
     this shared secret out-of-band, e.g., during device enrollment).
 
+    Rate-limited to prevent bulk-flood / DoS attacks that could exhaust
+    storage resources (60 requests per minute per client IP by default).
+
     Data minimization: only `nonce`/`ciphertext` (plus routing metadata) are
     ever accepted or stored — no plaintext biometric field exists in the
     request schema, so none can ever reach storage.
     """
+    client_ip = request.client.host if request.client else "unknown"
+    _check_ingest_rate_limit(client_ip)
+
     record: Dict[str, Any] = payload.model_dump(exclude_none=True)
 
     try:
@@ -228,18 +303,61 @@ def ingest_telemetry(payload: TelemetryIngestRequest) -> TelemetryIngestResponse
 
 @app.get(
     "/api/v1/telemetry/stored-ciphertexts",
-    response_model=List[Dict[str, Any]],
+    response_model=StoredCiphertextsResponse,
 )
-def get_stored_ciphertexts() -> List[Dict[str, Any]]:
+def get_stored_ciphertexts(
+    offset: int = Query(default=0, ge=0, description="Zero-based index of the first record to return."),
+    limit: int = Query(default=50, ge=1, le=200, description="Maximum number of records to return (1–200)."),
+) -> StoredCiphertextsResponse:
     """
-    Return every record currently stored in `mock_db.json`.
+    Return a paginated slice of records currently stored in `mock_db.json`.
 
     Intentionally requires no authorization: this endpoint serves as a live
     proof-of-concept that a stolen database dump or unauthorized third-party
     API read discloses only authenticated ciphertext ("encrypted noise"),
     never raw athlete biometrics — mitigating tactical performance espionage.
+
+    Use the ``offset`` and ``limit`` query parameters to page through large
+    result sets without loading the entire database into memory at once.
     """
-    return cloud_server.get_all_stored_records()
+    page = cloud_server.get_stored_records_page(offset=offset, limit=limit)
+    return StoredCiphertextsResponse(**page)
+
+
+@app.delete(
+    "/api/v1/telemetry/records/{index}",
+    response_model=DeleteRecordResponse,
+    dependencies=[Depends(require_api_key)],
+)
+def delete_record(index: int) -> DeleteRecordResponse:
+    """
+    Permanently delete a single stored encrypted record by its zero-based
+    position in the database (GDPR Art. 17 — right to erasure).
+
+    Requires a valid `X-API-Key` header. Only the ciphertext/nonce envelope
+    is ever removed; no plaintext biometric data is involved.
+
+    Args:
+        index: Zero-based position of the record to delete.
+
+    Raises:
+        HTTPException: 404 if the given index is outside the valid range.
+    """
+    try:
+        deleted = cloud_server.delete_record(index)
+    except IndexError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    remaining = len(cloud_server.get_all_stored_records())
+    logger.info(
+        "Deleted record at index=%d (remaining=%d)", index, remaining
+    )
+    return DeleteRecordResponse(
+        status="success",
+        message=f"Record at index {index} permanently deleted (GDPR Art. 17 erasure).",
+        deleted_record=deleted,
+        remaining_record_count=remaining,
+    )
 
 
 @app.post(

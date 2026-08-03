@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 from typing import Any, Dict, List
 
 # Fields that are ALLOWED to be persisted. Any payload containing keys outside
@@ -99,9 +100,16 @@ class CloudServer:
             return []
 
     def _write_records(self, records: List[Dict[str, Any]]) -> None:
-        """Atomically persist the full list of records to `mock_db.json`."""
-        with open(self.db_path, "w", encoding="utf-8") as fh:
+        """Atomically persist the full list of records to `mock_db.json`.
+
+        Writes to a sibling `.tmp` file first, then performs an atomic
+        `os.replace()` so that a crash mid-write never leaves a corrupt
+        (partially-written) database file on disk.
+        """
+        tmp_path = self.db_path + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(records, fh, indent=2)
+        os.replace(tmp_path, self.db_path)
 
     @staticmethod
     def _validate_storage_isolation(record: Dict[str, Any]) -> None:
@@ -134,26 +142,33 @@ class CloudServer:
         """
         Persist a single encrypted telemetry record to `mock_db.json`.
 
+        A server-assigned `received_at` UTC ISO-8601 timestamp is injected
+        automatically, providing an audit trail of when each packet arrived
+        at the cloud ingestion layer (independent of the edge-side `sent_at`).
+
         Args:
             record (Dict[str, Any]): Encrypted packet fields (gateway_id, device_id,
                                       player_id, sent_at, nonce, ciphertext, ...).
 
         Returns:
-            Dict[str, Any]: The stored record (including any server-assigned metadata).
+            Dict[str, Any]: The stored record including the server-assigned `received_at`.
 
         Raises:
             ValueError: If the record fails the storage isolation check (see
                         `_validate_storage_isolation`), i.e., it is not purely
                         encrypted ciphertext/nonce.
         """
-        self._validate_storage_isolation(record)
+        stored_record = dict(record)
+        stored_record["received_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        self._validate_storage_isolation(stored_record)
 
         with self._lock:
             records = self._read_records()
-            records.append(record)
+            records.append(stored_record)
             self._write_records(records)
 
-        return record
+        return stored_record
 
     def get_all_stored_records(self) -> List[Dict[str, Any]]:
         """
@@ -169,3 +184,57 @@ class CloudServer:
         """
         with self._lock:
             return self._read_records()
+
+    def get_stored_records_page(
+        self, offset: int = 0, limit: int = 50
+    ) -> Dict[str, Any]:
+        """
+        Return a paginated slice of stored records.
+
+        Args:
+            offset (int): Zero-based index of the first record to return.
+            limit (int): Maximum number of records to return (capped at 200).
+
+        Returns:
+            Dict[str, Any]: A dict with keys ``total``, ``offset``, ``limit``,
+                            and ``records`` (the requested slice).
+        """
+        limit = min(max(1, limit), 200)
+        offset = max(0, offset)
+        with self._lock:
+            all_records = self._read_records()
+        page = all_records[offset: offset + limit]
+        return {
+            "total": len(all_records),
+            "offset": offset,
+            "limit": limit,
+            "records": page,
+        }
+
+    def delete_record(self, index: int) -> Dict[str, Any]:
+        """
+        Delete a stored record by its zero-based position in the database.
+
+        Implements GDPR Art. 17 "right to erasure": an authorised caller may
+        request permanent removal of a specific encrypted record. The operation
+        is atomic — the database is never left in a partially-written state.
+
+        Args:
+            index (int): Zero-based position of the record to delete.
+
+        Returns:
+            Dict[str, Any]: The deleted record (for confirmation/audit logging).
+
+        Raises:
+            IndexError: If ``index`` is outside the range of stored records.
+        """
+        with self._lock:
+            records = self._read_records()
+            if index < 0 or index >= len(records):
+                raise IndexError(
+                    f"Record index {index} is out of range "
+                    f"(database contains {len(records)} record(s))."
+                )
+            deleted = records.pop(index)
+            self._write_records(records)
+        return deleted
