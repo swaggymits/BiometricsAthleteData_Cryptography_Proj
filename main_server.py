@@ -1,32 +1,47 @@
 """
 Data Privacy in Elite Performance: Protecting Athlete Biometrics
 Week 3: Cloud Server REST API (FastAPI)
+Week 5 Update: Access Control & GDPR Consent Toggle (AAA Enforcement)
 
 Exposes the secure ingestion/aggregation surface that a real cloud backend
 would present to edge gateways and authorized analytics consumers.
 
-Security & Compliance Notes (GDPR / CIA Availability):
--------------------------------------------------------
-- `POST /api/v1/telemetry/ingest` is the ONLY write path into storage, and it
+Security & Compliance Notes (GDPR / CIA / AAA):
+------------------------------------------------
+- ``POST /api/v1/telemetry/ingest`` is the ONLY write path into storage, and it
   is strictly validated by Pydantic models to accept nothing but hex-encoded
-  `nonce`/`ciphertext` plus routing metadata (data minimization by design —
+  ``nonce``/``ciphertext`` plus routing metadata (data minimization by design —
   GDPR Art. 5(1)(c): no more data than necessary is ever accepted or stored).
 - Rate limiting on the ingestion endpoint (default: 60 requests / minute per
   client IP) defends against bulk-flood / denial-of-service attacks that would
   exhaust disk space or CPU on the storage tier.
-- `GET /api/v1/telemetry/stored-ciphertexts` intentionally requires NO special
+- ``GET /api/v1/telemetry/stored-ciphertexts`` intentionally requires NO special
   authorization, because it is designed to be safely public: it proves that
   even a stolen database dump or an unauthorized third-party API read yields
   only authenticated ciphertext ("encrypted noise"), never raw biometrics —
-  directly mitigating tactical performance espionage. Supports `offset`/`limit`
-  query parameters for pagination so large databases stay responsive.
-- `POST /api/v1/telemetry/authorize-decrypt` is the ONLY path where plaintext
-  is ever reconstructed, and it requires the caller to supply the correct
-  pre-shared AES key. This models a real "authorized analyst / coaching
-  staff" decryption workflow, separate from the untrusted storage tier.
-- `DELETE /api/v1/telemetry/records/{index}` provides GDPR Art. 17 "right to
+directly mitigating tactical performance espionage. Supports ``offset``/
+  ``limit`` query parameters for pagination so large databases stay responsive.
+- ``POST /api/v1/athlete/consent`` (NEW — Week 5): accepts athlete consent status
+  updates (``player_id`` + ``privacy_toggle_consent`` flag) and stores them in
+  the in-process ``ConsentRegistry``.  Any subsequent decryption request for a
+  player with consent revoked is rejected with HTTP 403, implementing GDPR
+  Art. 7(3) (right to withdraw consent) and Art. 17 (right to be forgotten).
+- ``POST /api/v1/telemetry/authorize-decrypt`` (UPDATED — Week 5) now enforces
+  a three-gate authorization chain before reconstructing any plaintext:
+
+  1. **GDPR Consent Gate** — rejects with HTTP 403 if the athlete has revoked
+     consent in the ``ConsentRegistry``, regardless of the caller's role.
+  2. **RBAC Role Gate** — rejects with HTTP 403 if ``user_role`` is not in the
+     ``AUTHORIZED_DECRYPT_ROLES`` allow-list (currently only ``TEAM_DOCTOR``).
+  3. **Cryptographic Gate** — decryption proceeds only after both gates pass;
+     a wrong AES key still yields HTTP 401 (``InvalidTag``).
+
+  This models a production AAA (Authentication, Authorization, Accounting)
+  workflow: API key = Authentication; consent + role = Authorization;
+  structured server logs = Accounting.
+- ``DELETE /api/v1/telemetry/records/{index}`` provides GDPR Art. 17 "right to
   erasure" for an individual stored record, protected by the shared API key.
-- Running under `uvicorn` (ASGI) keeps the ingestion endpoint responsive and
+- Running under ``uvicorn`` (ASGI) keeps the ingestion endpoint responsive and
   horizontally scalable, supporting the Availability leg of the CIA triad for
   continuous, real-time telemetry ingestion during a live match.
 """
@@ -42,7 +57,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from cloud_server import CloudServer
+from cloud_server import AUTHORIZED_DECRYPT_ROLES, CloudServer, ConsentRegistry
 from config import settings
 from logging_config import configure_logging, get_logger
 from secure_gateway import SecureGateway
@@ -93,13 +108,16 @@ def _check_ingest_rate_limit(client_ip: str) -> None:
 app = FastAPI(
     title=settings.APP_NAME,
     description=(
-        "Week 3: Secure ingestion, encrypted-only storage, and authorized "
-        "decryption API for AES-256-GCM protected athlete biometric telemetry."
+        "Week 5: GDPR Consent Management, Role-Based Access Control (RBAC), "
+        "and AES-256-GCM protected athlete biometric telemetry pipeline."
     ),
-    version="3.0.0",
+    version="5.0.0",
 )
 
 cloud_server = CloudServer(db_path=settings.MOCK_DB_PATH)
+
+# Week 5: global consent registry (single source of truth for GDPR consent state)
+consent_registry = ConsentRegistry()
 
 
 @app.middleware("http")
@@ -239,6 +257,39 @@ class HealthResponse(BaseModel):
     stored_record_count: int
 
 
+# ---------------------------------------------------------------------------
+# Week 5 — GDPR Consent Management Models
+# ---------------------------------------------------------------------------
+
+class ConsentUpdateRequest(BaseModel):
+    """
+    Request contract for the GDPR consent toggle endpoint.
+
+    An athlete (via their ``AthleteDashboard`` client) sends their
+    ``player_id`` and new ``privacy_toggle_consent`` flag.  The server
+    records this in the ``ConsentRegistry`` and all subsequent
+    ``authorize-decrypt`` calls for that player will respect the new state.
+    """
+
+    player_id: str = Field(..., min_length=1, description="Athlete unique identifier.")
+    privacy_toggle_consent: bool = Field(
+        ...,
+        description=(
+            "True = consent granted (authorized roles may decrypt). "
+            "False = consent revoked (all decryption blocked per GDPR Art. 7(3))."
+        ),
+    )
+
+
+class ConsentUpdateResponse(BaseModel):
+    """Confirmation response returned after a successful consent state update."""
+
+    status: str
+    player_id: str
+    privacy_toggle_consent: bool
+    message: str
+
+
 @app.get("/health", response_model=HealthResponse, tags=["ops"])
 def health_check() -> HealthResponse:
     """
@@ -360,22 +411,132 @@ def delete_record(index: int) -> DeleteRecordResponse:
     )
 
 
+# ---------------------------------------------------------------------------
+# Week 5 — GDPR Consent Management Endpoint
+# ---------------------------------------------------------------------------
+
+@app.post(
+    "/api/v1/athlete/consent",
+    response_model=ConsentUpdateResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_api_key)],
+    tags=["consent"],
+)
+def update_athlete_consent(payload: ConsentUpdateRequest) -> ConsentUpdateResponse:
+    """
+    Update an athlete's GDPR consent flag in the server-side ``ConsentRegistry``.
+
+    This is the server-side complement to ``AthleteDashboard.update_consent()``.
+    Once this endpoint is called with ``privacy_toggle_consent = False``, the
+    server immediately begins blocking all ``authorize-decrypt`` requests for
+    the specified ``player_id``, regardless of the caller's role.
+
+    Implements:
+    - GDPR Art. 7(3): Right to withdraw consent at any time.
+    - GDPR Art. 17: Right to be forgotten (by blocking re-construction of
+      plaintext biometrics until consent is re-granted).
+
+    Requires a valid ``X-API-Key`` header (only provisioned gateways / coaching
+    staff dashboards may update consent on behalf of the athlete system).
+    """
+    try:
+        consent_registry.set_consent(payload.player_id, payload.privacy_toggle_consent)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    action = "GRANTED" if payload.privacy_toggle_consent else "REVOKED"
+    logger.info(
+        "GDPR consent %s for player_id=%s via /api/v1/athlete/consent",
+        action, payload.player_id,
+    )
+    return ConsentUpdateResponse(
+        status="success",
+        player_id=payload.player_id,
+        privacy_toggle_consent=payload.privacy_toggle_consent,
+        message=(
+            f"Consent {action} for athlete {payload.player_id}. "
+            f"All subsequent decryption requests will respect this setting."
+        ),
+    )
+
+
 @app.post(
     "/api/v1/telemetry/authorize-decrypt",
     response_model=AuthorizeDecryptResponse,
     dependencies=[Depends(require_api_key)],
 )
-def authorize_decrypt(request: AuthorizeDecryptRequest) -> AuthorizeDecryptResponse:
+def authorize_decrypt(
+    request: AuthorizeDecryptRequest,
+    user_role: str = Header(
+        ...,
+        description="Requesting party role (e.g., TEAM_DOCTOR, ANALYST, EXTERNAL_COMPANY).",
+        alias="X-User-Role",
+    ),
+    player_id: str = Header(
+        ...,
+        description="Athlete player ID whose record is being decrypted.",
+        alias="X-Player-Id",
+    ),
+) -> AuthorizeDecryptResponse:
     """
-    Simulate an authorized decryption workflow: given an encrypted record and
-    the valid pre-shared AES-256 key, reconstruct a `SecureGateway` instance
-    and call `SecureGateway.decrypt_data()` to recover the original plaintext
-    biometric payload.
+    Authorized decryption of a biometric record — Week 5 AAA-enforced path.
 
-    Requires a valid `X-API-Key` header IN ADDITION to the correct AES key,
-    modeling a two-factor authorized-analyst access path, distinct from the
-    untrusted public storage tier.
+    The request passes through THREE sequential security gates before any
+    plaintext is ever reconstructed:
+
+    **Gate 1 — API Key Authentication** (enforced by the ``require_api_key``
+    FastAPI dependency above; returns 401 if missing/wrong).
+
+    **Gate 2 — GDPR Consent Check** (new in Week 5):
+    Reads ``player_id`` from the ``X-Player-Id`` request header and queries
+    the ``ConsentRegistry``.  If ``privacy_toggle_consent == False`` for this
+    athlete, the request is rejected immediately with HTTP 403:
+    ``"Access Denied: Athlete has revoked biometric consent under GDPR."
+    No decryption key is touched; no plaintext is produced.
+
+    **Gate 3 — Role-Based Access Control (RBAC)** (new in Week 5):
+    Reads ``user_role`` from the ``X-User-Role`` request header and checks it
+    against ``AUTHORIZED_DECRYPT_ROLES`` (allow-list in ``cloud_server.py``).
+    Any role not on the list (e.g., ``ANALYST``, ``EXTERNAL_COMPANY``) is
+    rejected with HTTP 403:
+    ``"Access Denied: Insufficient Role Permissions."
+    Only ``TEAM_DOCTOR`` is currently permitted.
+
+    **Gate 4 — Cryptographic Decryption**:
+    After passing the above checks, a ``SecureGateway`` instance is
+    reconstructed with the supplied AES key and ``decrypt_data()`` is called.
+    A wrong key still yields HTTP 401 (``cryptography.exceptions.InvalidTag``).
     """
+    # ------------------------------------------------------------------ #
+    # GATE 2: GDPR Consent Check                                          #
+    # ------------------------------------------------------------------ #
+    if not consent_registry.is_consent_granted(player_id):
+        logger.warning(
+            "GDPR consent check FAILED for player_id=%s user_role=%s — access denied.",
+            player_id, user_role,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Athlete has revoked biometric consent under GDPR.",
+        )
+
+    # ------------------------------------------------------------------ #
+    # GATE 3: Role-Based Access Control (RBAC)                            #
+    # ------------------------------------------------------------------ #
+    if user_role not in AUTHORIZED_DECRYPT_ROLES:
+        logger.warning(
+            "RBAC check FAILED: user_role=%s is not authorised to decrypt "
+            "biometric data for player_id=%s.",
+            user_role, player_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Insufficient Role Permissions.",
+        )
+
+    # ------------------------------------------------------------------ #
+    # GATE 4: Cryptographic Decryption                                    #
+    # ------------------------------------------------------------------ #
     try:
         aes_key = bytes.fromhex(request.aes_key_hex)
     except (ValueError, binascii.Error) as exc:
@@ -409,8 +570,10 @@ def authorize_decrypt(request: AuthorizeDecryptRequest) -> AuthorizeDecryptRespo
         ) from exc
 
     logger.info(
-        "Authorized decryption succeeded for gateway_id=%s device_id=%s",
-        encrypted_packet.get("gateway_id"), encrypted_packet.get("device_id"),
+        "Authorized decryption SUCCEEDED for player_id=%s gateway_id=%s user_role=%s",
+        player_id,
+        encrypted_packet.get("gateway_id"),
+        user_role,
     )
     return AuthorizeDecryptResponse(status="success", decrypted_payload=decrypted_payload)
 

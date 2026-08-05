@@ -25,10 +25,12 @@ This project implements, week by week, a secure data pipeline that encrypts biom
 3. **`SecureGateway`** encrypts validated payloads with AES-256-GCM (unique nonce per message, authenticated tag for integrity/tamper-detection).
 4. **`pipeline_week2.py`** wires the device and gateway together into an end-to-end tick-by-tick simulation.
 5. **`CloudServer`** (`cloud_server.py`) persists ONLY hex-encoded ciphertext/nonce to `mock_db.json` — a storage-isolation gate that architecturally forbids plaintext biometrics from ever being written to disk.
-6. **`main_server.py`** exposes the Cloud Server as a FastAPI REST API: API-key authenticated ingestion, a public "stored ciphertexts" proof-of-encryption endpoint, and an authorized decryption endpoint gated by the pre-shared AES key.
-7. **`config.py`** centralizes all runtime configuration (env vars / `.env`), and **`logging_config.py`** provides structured, leveled logging — both standard practice for production services.
-8. **Docker / Docker Compose** package the API into a minimal, non-root, health-checked container image for reproducible deployment.
-9. **GitHub Actions CI** (`.github/workflows/ci.yml`) automatically lints, type-checks, tests, and Docker-builds the project on every push/PR.
+6. **`ConsentRegistry`** (`cloud_server.py`, Week 5) is a thread-safe in-memory registry that maps each `player_id` to their GDPR consent flag and is the single source of truth consulted before any decryption is allowed.
+7. **`AthleteDashboard`** (`athlete_dashboard.py`, Week 5) is the athlete-facing logic class implementing GDPR consent toggle (with HMAC-signed consent packets) and AAA authentication primitives.
+8. **`main_server.py`** exposes the Cloud Server as a FastAPI REST API: API-key authenticated ingestion, a public "stored ciphertexts" proof-of-encryption endpoint, a GDPR consent management endpoint, and an authorized decryption endpoint gated by consent + RBAC role + AES key.
+9. **`config.py`** centralizes all runtime configuration (env vars / `.env`), and **`logging_config.py`** provides structured, leveled logging — both standard practice for production services.
+10. **Docker / Docker Compose** package the API into a minimal, non-root, health-checked container image for reproducible deployment.
+11. **GitHub Actions CI** (`.github/workflows/ci.yml`) automatically lints, type-checks, tests, and Docker-builds the project on every push/PR.
 
 ---
 
@@ -39,21 +41,24 @@ This project implements, week by week, a secure data pipeline that encrypts biom
 ├── secure_gateway.py          # SecureGateway class — AES-256-GCM encryption/decryption
 ├── iot_device.py               # IoTDeviceMock class — simulated wearable sensor
 ├── pipeline_week2.py           # Integration pipeline: IoTDeviceMock -> SecureGateway
-├── cloud_server.py              # CloudServer class — encrypted-only persistent mock storage
-├── main_server.py                # FastAPI REST API: ingest / stored-ciphertexts / authorize-decrypt
-├── config.py                      # Centralized settings (env vars / .env) via pydantic-settings
-├── logging_config.py               # Structured logging setup
-├── live_test_client.py              # Manual live-server smoke test client (real HTTP requests)
-├── run_all.py                        # Master runner: all tests + pipeline demo in one command
-├── test_week1.py                      # Unit/integration tests (schema validation + encryption)
-├── test_pipeline_week3.py              # End-to-end test: IoT -> Gateway -> Cloud API
-├── requirements.txt                     # Python dependencies
-├── Dockerfile                             # Multi-stage, non-root, health-checked container image
-├── docker-compose.yml                      # Local/prod-like container orchestration
-├── .env.example                             # Template for local environment configuration
-├── pyproject.toml                            # ruff / mypy configuration
-├── .github/workflows/ci.yml                   # CI: lint, type-check, test, Docker build
-├── .vscode/launch.json                         # VS Code Run & Debug configurations
+├── cloud_server.py              # CloudServer (encrypted-only storage) + ConsentRegistry (Week 5)
+├── athlete_dashboard.py          # AthleteDashboard — GDPR consent toggle & AAA auth (Week 5)
+├── main_server.py                 # FastAPI REST API: ingest / consent / stored-ciphertexts / authorize-decrypt
+├── verify_month1_pipeline.py       # Week 4: End-to-end benchmark & verification (Phase 1 complete)
+├── config.py                        # Centralized settings (env vars / .env) via pydantic-settings
+├── logging_config.py                 # Structured logging setup
+├── live_test_client.py                # Manual live-server smoke test client (real HTTP requests)
+├── run_all.py                          # Master runner: all tests + pipeline demo in one command
+├── test_week1.py                        # Unit/integration tests (schema validation + encryption)
+├── test_pipeline_week3.py                # End-to-end test: IoT -> Gateway -> Cloud API
+├── test_pipeline_week5.py                 # Week 5: GDPR Consent & RBAC integration tests
+├── requirements.txt                        # Python dependencies
+├── Dockerfile                               # Multi-stage, non-root, health-checked container image
+├── docker-compose.yml                        # Local/prod-like container orchestration
+├── .env.example                               # Template for local environment configuration
+├── pyproject.toml                              # ruff / mypy configuration
+├── .github/workflows/ci.yml                     # CI: lint, type-check, test, Docker build
+├── .vscode/launch.json                           # VS Code Run & Debug configurations
 └── README.md
 ```
 
@@ -78,8 +83,10 @@ Enforced by `validate_biometric_payload()` in `biometric_schema.py`, which acts 
 - **Confidentiality** — AES-256 encryption ensures biometric payloads are unreadable to eavesdroppers.
 - **Integrity & Authenticity** — AES-GCM (AEAD) appends a 128-bit authentication tag; any tampering during transit causes decryption to fail (`cryptography.exceptions.InvalidTag`).
 - **Replay Protection / Semantic Security** — A fresh cryptographically random 96-bit nonce (`os.urandom(12)`) is generated per encryption, so identical plaintext never produces identical ciphertext.
-- **API Authentication** — `/ingest` and `/authorize-decrypt` require a shared-secret `X-API-Key` header, so only provisioned gateways/analysts can write or decrypt data. `/stored-ciphertexts` is deliberately left public as a live proof that stored data is encrypted-only.
+- **API Authentication** — `/ingest`, `/athlete/consent`, and `/authorize-decrypt` require a shared-secret `X-API-Key` header, so only provisioned gateways/analysts can write, update consent, or decrypt data. `/stored-ciphertexts` is deliberately left public as a live proof that stored data is encrypted-only.
 - **Data Minimization (GDPR Art. 5(1)(c))** — the storage layer (`CloudServer`) architecturally refuses to persist any field that isn't a hex-encoded ciphertext/nonce or benign routing metadata.
+- **GDPR Consent Management (Art. 7 & 17, Week 5)** — `AthleteDashboard.update_consent(False)` triggers `POST /api/v1/athlete/consent` which updates the `ConsentRegistry`. Any subsequent `authorize-decrypt` call for that athlete is immediately rejected with HTTP 403, regardless of the requester's role. HMAC-SHA256-signed consent packets provide a tamper-evident audit trail.
+- **Role-Based Access Control / RBAC (Week 5)** — Only `user_role = "TEAM_DOCTOR"` (sent via `X-User-Role` header) may obtain decrypted biometrics. All other roles (`ANALYST`, `EXTERNAL_COMPANY`, etc.) are rejected at the authorization layer with HTTP 403, enforcing the principle of least privilege.
 
 ---
 
@@ -152,7 +159,8 @@ This starts a uvicorn server at `http://localhost:8000`. Interactive API docs (S
 - `GET /health` — liveness/readiness probe (no auth required).
 - `POST /api/v1/telemetry/ingest` *(requires `X-API-Key` header)* — accepts a hex-encoded encrypted packet (`gateway_id`, `nonce`, `ciphertext`, ...) and stores it in `mock_db.json`.
 - `GET /api/v1/telemetry/stored-ciphertexts` *(public)* — returns everything in `mock_db.json`; proves the store only ever contains encrypted noise.
-- `POST /api/v1/telemetry/authorize-decrypt` *(requires `X-API-Key` header)* — given an encrypted record and the correct 256-bit shared AES key (hex), returns the recovered plaintext biometric payload.
+- `POST /api/v1/athlete/consent` *(requires `X-API-Key` header, Week 5)* — accepts `{player_id, privacy_toggle_consent}` and updates the server-side `ConsentRegistry`. Setting `privacy_toggle_consent=false` immediately blocks all decryption for that athlete.
+- `POST /api/v1/telemetry/authorize-decrypt` *(requires `X-API-Key` + `X-User-Role` + `X-Player-Id` headers, Week 5)* — enforces GDPR consent check and RBAC role check before decrypting; only `TEAM_DOCTOR` role may obtain plaintext.
 
 Test it with `curl` (using the default dev API key from `.env.example`):
 
@@ -176,7 +184,35 @@ venv/bin/python live_test_client.py
 venv/bin/python -m unittest test_pipeline_week3 -v
 ```
 
-### 7. Run with Docker
+### 7. Run the Week 4 Month 1 End-to-End Benchmark & Verification
+
+```zsh
+venv/bin/python verify_month1_pipeline.py             # default 20 ticks
+venv/bin/python verify_month1_pipeline.py --ticks 50  # custom iteration count
+```
+
+This script runs the **complete Month 1 pipeline in-process** (no server required) and prints a structured benchmark report covering:
+- AES-256-GCM encryption latency vs raw JSON serialisation
+- Payload size overhead (raw JSON → hex ciphertext)
+- API ingestion latency (min / avg / max / σ)
+- Authorized decryption round-trip integrity (20/20 payloads verified)
+- Database isolation assertion (0 plaintext keywords in `mock_db.json`)
+
+### 8. Run the Week 5 GDPR Consent & RBAC Integration Tests
+
+```zsh
+venv/bin/python -m unittest test_pipeline_week5 -v
+```
+
+This test suite validates:
+- **Consent Granted Path:** `privacy_toggle_consent = True` + `user_role = "TEAM_DOCTOR"` → HTTP 200 + correct plaintext payload.
+- **GDPR Revocation Path:** `privacy_toggle_consent = False` + `user_role = "TEAM_DOCTOR"` → HTTP 403 GDPR consent error.
+- **Unauthorised Role Path:** `privacy_toggle_consent = True` + `user_role = "EXTERNAL_COMPANY"` → HTTP 403 RBAC error.
+- **Database Encryption Integrity:** `mock_db.json` contains 0 plaintext biometric keywords after all consent toggles.
+- **AthleteDashboard unit tests:** constructor, consent toggle, HMAC signing, authentication.
+- **ConsentRegistry unit tests:** default behaviour, concurrent state, snapshot isolation.
+
+### 8. Run with Docker
 
 ```zsh
 docker compose up --build
@@ -223,7 +259,9 @@ Every push/PR triggers `.github/workflows/ci.yml`, which:
 - ✅ **Week 1** — Environment setup & core encryption module (`SecureGateway`, AES-256-GCM).
 - ✅ **Week 2** — IoT device mocking & edge transmission pipeline (`IoTDeviceMock`, `pipeline_week2.py`).
 - ✅ **Week 3** — Cloud Server & Secure REST APIs (`CloudServer`, `main_server.py`, encrypted-only storage, authorized decryption).
-- 🔜 **Future weeks** — Key management/rotation, secure storage hardening, access control, performance benchmarking.
+- ✅ **Week 4** — End-of-Month 1 integration, benchmarking & verification (`verify_month1_pipeline.py`). **Phase 1 — 100% Complete.**
+- ✅ **Week 5** — Access Control & GDPR Consent Toggle (`AthleteDashboard`, `ConsentRegistry`, `POST /api/v1/athlete/consent`, RBAC on `authorize-decrypt`). **Month 2 — Week 5 Complete.**
+- 🔜 **Future weeks** — Key management/rotation, secure storage hardening, advanced performance analysis, audit logging.
 
 ---
 
