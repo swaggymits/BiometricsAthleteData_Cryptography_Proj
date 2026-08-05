@@ -67,9 +67,10 @@ def main() -> None:
     print("=" * 80)
     resp = requests.get(f"{BASE_URL}/api/v1/telemetry/stored-ciphertexts")
     assert resp.status_code == 200
-    stored = resp.json()
+    envelope = resp.json()
+    stored = envelope["records"]  # paginated response: {total, offset, limit, records}
     stored_text = json.dumps(stored)
-    print(f"Stored record count: {len(stored)}")
+    print(f"Stored record count: {len(stored)} (total in DB: {envelope['total']})")
 
     for schema_payload, _packet in sent_records:
         for field in ("heart_rate", "fatigue_index", "glucose_level", "injury_risk"):

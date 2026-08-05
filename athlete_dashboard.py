@@ -54,7 +54,6 @@ import os
 import time
 from typing import Any, Dict
 
-
 # ---------------------------------------------------------------------------
 # Allowed credential keys for the authenticate() method.  Keeping validation
 # explicit prevents accidental acceptance of unexpected credential shapes.

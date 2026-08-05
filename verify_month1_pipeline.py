@@ -42,16 +42,16 @@ from typing import Any, Dict, List, Tuple
 import httpx
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-# ── project imports ────────────────────────────────────────────────────────────
-from iot_device import IoTDeviceMock
-from pipeline_week2 import adapt_to_schema          # reuse existing adapter
-from secure_gateway import SecureGateway
-
 # We import the FastAPI ``app`` directly so we can drive it via
 # ``httpx.AsyncClient(app=app, ...)``.  We must monkey-patch
 # ``config.settings.MOCK_DB_PATH`` BEFORE importing ``main_server`` so the
 # CloudServer inside it uses our temp db file.
 import config as _config_module
+
+# ── project imports ────────────────────────────────────────────────────────────
+from iot_device import IoTDeviceMock
+from pipeline_week2 import adapt_to_schema  # reuse existing adapter
+from secure_gateway import SecureGateway
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -197,11 +197,11 @@ async def run_pipeline(ticks: int = 20) -> None:
         "Week 4 -- Month 1 End-to-End Pipeline Verification & Benchmarking"
     )
     print(
-        f"  Thesis:  'Data Privacy in Elite Performance: Protecting Athlete Biometrics'"
+        "  Thesis:  'Data Privacy in Elite Performance: Protecting Athlete Biometrics'"
     )
     print(f"  Ticks:   {ticks} biometric sensor readings")
     print(
-        f"  Engine:  AES-256-GCM  |  Transport: FastAPI in-process (httpx.AsyncClient)"
+        "  Engine:  AES-256-GCM  |  Transport: FastAPI in-process (httpx.AsyncClient)"
     )
 
     # ── Phase 0: temp database ─────────────────────────────────────────────────
@@ -218,9 +218,10 @@ async def run_pipeline(ticks: int = 20) -> None:
     API_KEY = _config_module.settings.CLOUD_API_KEY
 
     import importlib
+
     import main_server as _ms_module
     importlib.reload(_ms_module)          # re-bind CloudServer to temp db
-    from main_server import app           # noqa: E402  (runtime import needed)
+    from main_server import app  # noqa: E402  (runtime import needed)
 
     _ok(f"Temporary database: {db_path}")
     _ok("FastAPI app loaded (in-process, no live server)")
@@ -248,7 +249,7 @@ async def run_pipeline(ticks: int = 20) -> None:
         schema_payloads.append(schema)
 
     _ok(f"Generated {ticks} biometric ticks from IoTDeviceMock")
-    print(f"\n  Sample tick payload (tick #1):")
+    print("\n  Sample tick payload (tick #1):")
     for k, v in schema_payloads[0].items():
         print(f"    {k}: {v}")
 
@@ -354,7 +355,10 @@ async def run_pipeline(ticks: int = 20) -> None:
         _section("Phase 6 -- Verification Read (GET /api/v1/telemetry/stored-ciphertexts)")
 
         get_t0 = time.perf_counter()
-        read_resp = await client.get("/api/v1/telemetry/stored-ciphertexts")
+        read_resp = await client.get(
+            "/api/v1/telemetry/stored-ciphertexts",
+            params={"offset": 0, "limit": max(ticks, 1)},
+        )
         read_latency_ms = (time.perf_counter() - get_t0) * 1_000
 
         if read_resp.status_code != 200:
@@ -362,7 +366,9 @@ async def run_pipeline(ticks: int = 20) -> None:
                 f"Expected HTTP 200 but got {read_resp.status_code}: {read_resp.text}"
             )
 
-        stored_records: List[Dict[str, Any]] = read_resp.json()
+        # NOTE: /stored-ciphertexts now returns a paginated envelope
+        # ({total, offset, limit, records}) rather than a bare list.
+        stored_records: List[Dict[str, Any]] = read_resp.json()["records"]
         _ok(
             f"GET /api/v1/telemetry/stored-ciphertexts -> HTTP 200 ({read_latency_ms:.2f} ms)"
         )
@@ -397,6 +403,21 @@ async def run_pipeline(ticks: int = 20) -> None:
             "(POST /api/v1/telemetry/authorize-decrypt)"
         )
 
+        # Week 5 AAA enforcement: decryption now requires (1) GDPR consent to
+        # be granted for the athlete and (2) an authorised X-User-Role. Grant
+        # consent up front so this benchmark measures the happy path.
+        consent_resp = await client.post(
+            "/api/v1/athlete/consent",
+            json={"player_id": device.player_id, "privacy_toggle_consent": True},
+            headers={"X-API-Key": API_KEY},
+        )
+        if consent_resp.status_code != 200:
+            _fail(
+                f"Failed to grant GDPR consent for {device.player_id}: "
+                f"HTTP {consent_resp.status_code}: {consent_resp.text}"
+            )
+        _ok(f"GDPR consent granted for player_id={device.player_id}")
+
         decrypt_failures: int = 0
         decrypt_mismatches: int = 0
         decrypt_latencies_ms: List[float] = []
@@ -412,7 +433,11 @@ async def run_pipeline(ticks: int = 20) -> None:
             dec_resp = await client.post(
                 "/api/v1/telemetry/authorize-decrypt",
                 json=body,
-                headers={"X-API-Key": API_KEY},
+                headers={
+                    "X-API-Key": API_KEY,
+                    "X-User-Role": "TEAM_DOCTOR",
+                    "X-Player-Id": device.player_id,
+                },
             )
             decrypt_latencies_ms.append((time.perf_counter() - t0) * 1_000)
 
@@ -473,7 +498,7 @@ async def run_pipeline(ticks: int = 20) -> None:
     )
     print()
     print("  +-- API INGESTION LATENCY (POST /ingest) -------------------------+")
-    _metric(f"Ticks ingested",                      f"{ticks} / {ticks} ({ingest_failures} failures)")
+    _metric("Ticks ingested",                      f"{ticks} / {ticks} ({ingest_failures} failures)")
     _metric("Avg ingestion latency",                f"{avg_ingest:.2f} ms  (stddev={std_ingest:.2f} ms)")
     _metric("Min / Max ingestion latency",          f"{min_ingest:.2f} ms / {max_ingest:.2f} ms")
     print()
