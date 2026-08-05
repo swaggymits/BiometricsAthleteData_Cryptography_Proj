@@ -3,9 +3,11 @@ Unit and Integration Tests for Week 1: Core Encryption Module
 """
 
 import unittest
+
 from cryptography.exceptions import InvalidTag
-from secure_gateway import SecureGateway
+
 from biometric_schema import validate_biometric_payload
+from secure_gateway import SecureGateway
 
 
 class TestBiometricSchemaValidation(unittest.TestCase):
@@ -111,10 +113,14 @@ class TestWeek1SecureGateway(unittest.TestCase):
         ciphertext_bytes = bytes.fromhex(packet["ciphertext"])
         self.assertEqual(len(nonce_bytes), 12)  # 96-bit nonce standard for GCM
 
-        # Assert ciphertext is not readable plain text
-        self.assertNotIn("165", packet["ciphertext"])
-        self.assertNotIn("heart_rate", packet["ciphertext"])
-        self.assertNotIn("82.5", packet["ciphertext"])
+        # Assert ciphertext is not readable plain text. Checking a bare short
+        # number (e.g., "165") is statistically unreliable, since short digit
+        # sequences can coincidentally appear in any sufficiently long hex
+        # string. Instead assert the much stronger/meaningful signal: the
+        # exact JSON key="value" substring must not leak into the ciphertext.
+        self.assertNotIn(b'"heart_rate": 165', ciphertext_bytes)
+        self.assertNotIn(b"heart_rate", ciphertext_bytes)
+        self.assertNotIn(b'"fatigue_index": 82.5', ciphertext_bytes)
 
         # Decrypt payload
         decrypted_data = self.gateway.decrypt_data(packet)

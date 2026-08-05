@@ -22,6 +22,7 @@ Float         | injury_risk      | Injury probability (0.0 - 1.0)            | R
 """
 
 from __future__ import annotations
+
 from typing import TypedDict
 
 
