@@ -133,9 +133,15 @@ class TestWeek3Pipeline(unittest.TestCase):
         self.assertIn("received_at", found, "stored record is missing server-assigned 'received_at'.")
 
         # 5. POST to authorize-decrypt with the correct key and verify recovery.
+        # Week 5: X-User-Role and X-Player-Id headers are now required by the
+        # AAA-enforced endpoint (RBAC + GDPR consent gates).
         decrypt_response = self.client.post(
             "/api/v1/telemetry/authorize-decrypt",
-            headers=API_KEY_HEADERS,
+            headers={
+                **API_KEY_HEADERS,
+                "X-User-Role": "TEAM_DOCTOR",
+                "X-Player-Id": self.device.player_id,
+            },
             json={
                 "record": {
                     "gateway_id": encrypted_packet["gateway_id"],
@@ -163,9 +169,15 @@ class TestWeek3Pipeline(unittest.TestCase):
         )
 
         wrong_key = AESGCM.generate_key(bit_length=256)
+        # Week 5: include the now-required RBAC + consent headers so the
+        # request reaches Gate 4 (crypto) and returns 401, not 422.
         response = self.client.post(
             "/api/v1/telemetry/authorize-decrypt",
-            headers=API_KEY_HEADERS,
+            headers={
+                **API_KEY_HEADERS,
+                "X-User-Role": "TEAM_DOCTOR",
+                "X-Player-Id": self.device.player_id,
+            },
             json={
                 "record": {
                     "gateway_id": encrypted_packet["gateway_id"],

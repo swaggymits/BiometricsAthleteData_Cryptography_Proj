@@ -1,10 +1,19 @@
 """
 Data Privacy in Elite Performance: Protecting Athlete Biometrics
 Week 3: Cloud Server — Persistent Mock Storage & Data Minimization Layer
+Week 5 Update: GDPR Consent Registry (Access Control & GDPR Consent Toggle)
 
-This module implements the `CloudServer` class, which represents the ingestion
-and storage backend that receives encrypted biometric telemetry from edge
-`SecureGateway` instances over the network.
+This module implements two classes:
+
+``CloudServer``
+    The ingestion and storage backend that receives encrypted biometric
+    telemetry from edge ``SecureGateway`` instances over the network.
+
+``ConsentRegistry`` (NEW — Week 5)
+    A thread-safe, in-memory registry that maps each ``player_id`` to their
+    current GDPR consent flag (``privacy_toggle_consent: bool``).  It is the
+    single source of truth for consent state consulted by the FastAPI
+    ``authorize-decrypt`` endpoint before performing any decryption.
 
 Security & Compliance Design (GDPR / CIA Triad):
 -------------------------------------------------
@@ -24,10 +33,20 @@ Security & Compliance Design (GDPR / CIA Triad):
    the shared AES key (see `main_server.py`'s `authorize-decrypt` endpoint),
    keeping the "store" and "decrypt" trust boundaries strictly separated.
 
-3. Availability (CIA Triad):
+3. GDPR Consent Enforcement (NEW — Week 5, Art. 7 & Art. 17):
+   ``ConsentRegistry.is_consent_granted()`` is called by the
+   ``authorize-decrypt`` endpoint BEFORE the AES-256-GCM decryption step.
+   If the athlete has set ``privacy_toggle_consent = False``, the endpoint
+   returns HTTP 403 immediately — no key material is ever used, and no
+   plaintext is ever reconstructed.  This enforces GDPR Art. 7(3) (right
+   to withdraw consent) and Art. 17 (right to be forgotten / erasure).
+
+4. Availability (CIA Triad):
    Storage is persisted to a local JSON file (`mock_db.json`) so ingested
    records survive server restarts, simulating a durable (if simplistic)
-   cloud persistence layer for this academic prototype.
+   cloud persistence layer for this academic prototype.  The consent
+   registry is in-memory (appropriate for a prototype); a production system
+   would persist it to a dedicated, audited consent database.
 """
 
 from __future__ import annotations
@@ -54,6 +73,13 @@ _ALLOWED_RECORD_FIELDS = {
 # Fields that MUST be present and MUST be hex strings — the only fields that
 # are permitted to carry the actual cryptographic material.
 _REQUIRED_HEX_FIELDS = ("nonce", "ciphertext")
+
+# ---------------------------------------------------------------------------
+# Week 5: Role-Based Access Control (RBAC) — authorised decryption roles.
+# Only roles listed here may receive decrypted biometric data.  Adding a
+# new authorised role requires an explicit change here (allow-list design).
+# ---------------------------------------------------------------------------
+AUTHORIZED_DECRYPT_ROLES: frozenset[str] = frozenset({"TEAM_DOCTOR"})
 
 
 def _is_hex_string(value: Any) -> bool:
@@ -238,3 +264,90 @@ class CloudServer:
             deleted = records.pop(index)
             self._write_records(records)
         return deleted
+
+
+# ---------------------------------------------------------------------------
+# Week 5 — GDPR Consent Registry
+# ---------------------------------------------------------------------------
+
+class ConsentRegistry:
+    """
+    Thread-safe in-memory GDPR consent registry.
+
+    Maps ``player_id`` → ``privacy_toggle_consent`` (bool) and is the single
+    authoritative source consulted by the ``authorize-decrypt`` endpoint before
+    any decryption is allowed.  It is intentionally separate from
+    ``CloudServer`` so that the consent-management concern is cleanly isolated
+    from the encrypted-storage concern.
+
+    Default Consent Policy:
+        Athletes NOT yet registered in the registry are assumed to have
+        **granted** consent (``True``), matching the ``AthleteDashboard``
+        default.  The moment an athlete explicitly revokes consent via
+        ``POST /api/v1/athlete/consent``, this registry records ``False``
+        and the decryption endpoint will start rejecting requests.
+
+    Thread Safety:
+        All public methods acquire ``self._lock`` before reading or writing
+        the internal state dictionary, making the registry safe for concurrent
+        use by multiple FastAPI worker threads / async tasks.
+    """
+
+    def __init__(self) -> None:
+        """Initialise an empty consent registry with a reentrant lock."""
+        self._lock = threading.Lock()
+        # {player_id: privacy_toggle_consent}
+        self._registry: Dict[str, bool] = {}
+
+    def set_consent(self, player_id: str, consent_status: bool) -> None:
+        """
+        Store or update the GDPR consent flag for the specified athlete.
+
+        Called by ``POST /api/v1/athlete/consent`` whenever an athlete
+        (or their dashboard client) submits a consent status update.
+
+        Args:
+            player_id (str):      Unique athlete identifier.
+            consent_status (bool): New GDPR consent value.
+
+        Raises:
+            ValueError: If ``player_id`` is empty / not a string.
+            TypeError:  If ``consent_status`` is not a bool.
+        """
+        if not player_id or not isinstance(player_id, str):
+            raise ValueError("player_id must be a non-empty string.")
+        if not isinstance(consent_status, bool):
+            raise TypeError(
+                f"consent_status must be a bool, got {type(consent_status).__name__}."
+            )
+        with self._lock:
+            self._registry[player_id] = consent_status
+
+    def is_consent_granted(self, player_id: str) -> bool:
+        """
+        Return whether the specified athlete has granted biometric access consent.
+
+        Unknown athletes (not yet in the registry) are treated as having
+        granted consent (matching the ``AthleteDashboard`` default of
+        ``privacy_toggle_consent = True``).
+
+        Args:
+            player_id (str): Unique athlete identifier.
+
+        Returns:
+            bool: ``True`` if consent is granted (or athlete is not registered);
+                  ``False`` if the athlete has explicitly revoked consent.
+        """
+        with self._lock:
+            return self._registry.get(player_id, True)
+
+    def get_all_consent_states(self) -> Dict[str, bool]:
+        """
+        Return a snapshot of the full registry for audit/debug purposes.
+
+        Returns:
+            Dict[str, bool]: A copy of the internal ``{player_id: consent}``
+                             mapping (copy prevents external mutation).
+        """
+        with self._lock:
+            return dict(self._registry)
