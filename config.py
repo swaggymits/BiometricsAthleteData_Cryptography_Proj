@@ -29,6 +29,13 @@ class Settings(BaseSettings):
         LOG_LEVEL: Python logging level name (e.g., "INFO", "DEBUG").
         HOST / PORT: Bind address for uvicorn.
         MOCK_DB_PATH: Filesystem path of the JSON mock persistence layer.
+        AUDIT_LOG_PATH: Filesystem path of the CSV audit log (Week 6).
+                         Defaults to ``"audit_log.csv"`` in the working directory;
+                         override to ``/data/audit_log.csv`` in Docker so the file
+                         is persisted on the named volume across container restarts.
+        LEDGER_FILE_PATH: Filesystem path of the JSON blockchain ledger (Week 7).
+                           Defaults to ``"ledger_file.json"``; override to
+                           ``/data/ledger_file.json`` in Docker for the same reason.
         CLOUD_API_KEY: Shared-secret API key required (via `X-API-Key` header)
                         to call the ingestion and authorize-decrypt endpoints.
                         The public "stored-ciphertexts" endpoint deliberately
@@ -47,6 +54,8 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     MOCK_DB_PATH: str = "mock_db.json"
+    AUDIT_LOG_PATH: str = "audit_log.csv"
+    LEDGER_FILE_PATH: str = "ledger_file.json"
 
     CLOUD_API_KEY: str = "dev-only-insecure-change-me"
 

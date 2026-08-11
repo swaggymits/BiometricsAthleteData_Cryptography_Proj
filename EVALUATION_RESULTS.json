@@ -1,0 +1,22 @@
+{
+  "benchmark_iterations": 100,
+  "successful_request_rate_pct": 100.0,
+  "failed_request_rate_pct": 100.0,
+  "avg_response_times_ms": {
+    "ingest": 1.881,
+    "consent": 1.257,
+    "authorize_decrypt": 2.86,
+    "transfer": 3.335
+  },
+  "raw_json_serialise_ms": 0.0028,
+  "encryption_overhead_ms": 0.0094,
+  "decryption_overhead_ms": 0.006,
+  "throughput_req_per_sec": 374.97,
+  "storage_overhead": {
+    "raw_biometric_bytes": 252,
+    "ciphertext_bytes": 720,
+    "audit_row_bytes": 109,
+    "ledger_block_bytes": 408,
+    "ciphertext_overhead_pct": 185.71
+  }
+}
