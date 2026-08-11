@@ -8,11 +8,16 @@ services:
     environment:
       ENVIRONMENT: production
       LOG_LEVEL: INFO
+      # All three runtime data files are stored on the persistent named volume
+      # so they survive container restarts and image upgrades.
       MOCK_DB_PATH: /data/mock_db.json
+      AUDIT_LOG_PATH: /data/audit_log.csv
+      LEDGER_FILE_PATH: /data/ledger_file.json
       CLOUD_API_KEY: ${CLOUD_API_KEY:-dev-only-insecure-change-me}
       MAX_PACKET_AGE_SECONDS: 300
     volumes:
-      # Persist the mock database outside the container filesystem.
+      # Persist all runtime data (encrypted records, audit log, ledger) outside
+      # the container filesystem so they survive restarts and image upgrades.
       - biometrics_data:/data
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]

@@ -2,6 +2,8 @@
 Data Privacy in Elite Performance: Protecting Athlete Biometrics
 Week 3: Cloud Server REST API (FastAPI)
 Week 5 Update: Access Control & GDPR Consent Toggle (AAA Enforcement)
+Week 6 Update: Audit Logging & Anti-Black Market Protection (AAA Accounting / GDPR Art. 5(2))
+Week 7 Update: Local Hashed Ledger & Transfer Escrow Simulation (Integrity / CIA Triad)
 
 Exposes the secure ingestion/aggregation surface that a real cloud backend
 would present to edge gateways and authorized analytics consumers.
@@ -39,6 +41,10 @@ directly mitigating tactical performance espionage. Supports ``offset``/
   This models a production AAA (Authentication, Authorization, Accounting)
   workflow: API key = Authentication; consent + role = Authorization;
   structured server logs = Accounting.
+- ``POST /api/v1/telemetry/authorize-decrypt`` additionally writes a row to
+  ``audit_log.csv`` (via ``AuditLogger``) on *every* call — success or denial —
+  providing a tamper-evident access trail for forensic investigation of any
+  potential biometric data leak (GDPR Art. 5(2); AAA Accounting leg).
 - ``DELETE /api/v1/telemetry/records/{index}`` provides GDPR Art. 17 "right to
   erasure" for an individual stored record, protected by the shared API key.
 - Running under ``uvicorn`` (ASGI) keeps the ingestion endpoint responsive and
@@ -57,8 +63,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
+from audit_logger import AuditLogger
 from cloud_server import AUTHORIZED_DECRYPT_ROLES, CloudServer, ConsentRegistry
 from config import settings
+from local_hashed_ledger import LocalHashedLedger
 from logging_config import configure_logging, get_logger
 from secure_gateway import SecureGateway
 
@@ -108,16 +116,25 @@ def _check_ingest_rate_limit(client_ip: str) -> None:
 app = FastAPI(
     title=settings.APP_NAME,
     description=(
-        "Week 5: GDPR Consent Management, Role-Based Access Control (RBAC), "
-        "and AES-256-GCM protected athlete biometric telemetry pipeline."
+        "Week 7: Local Hashed Ledger & Transfer Escrow — SHA-256 blockchain "
+        "committing athlete transfer events with GDPR consent gating, escrow "
+        "verification, and full AAA audit trail across all endpoints."
     ),
-    version="5.0.0",
+    version="7.0.0",
 )
 
 cloud_server = CloudServer(db_path=settings.MOCK_DB_PATH)
 
 # Week 5: global consent registry (single source of truth for GDPR consent state)
 consent_registry = ConsentRegistry()
+
+# Week 6: module-level audit logger — path configurable via AUDIT_LOG_PATH env var
+# so Docker can persist the CSV to the /data named volume across restarts.
+audit_logger = AuditLogger(log_file_path=settings.AUDIT_LOG_PATH)
+
+# Week 7: module-level SHA-256 blockchain ledger — path configurable via LEDGER_FILE_PATH
+# env var so Docker can persist the ledger to the /data named volume across restarts.
+ledger = LocalHashedLedger(ledger_file_json=settings.LEDGER_FILE_PATH)
 
 
 @app.middleware("http")
@@ -344,6 +361,17 @@ def ingest_telemetry(
         "Ingested encrypted packet gateway_id=%s device_id=%s (total stored=%d)",
         payload.gateway_id, payload.device_id, stored_count,
     )
+
+    # Week 6 — Audit: record every successful telemetry ingestion event.
+    audit_logger.log_access(
+        user_id="system",
+        user_role="GATEWAY",
+        player_id=payload.player_id or "unknown",
+        action="TELEMETRY_INGEST",
+        status="SUCCESS",
+        ip_address=client_ip,
+    )
+
     return TelemetryIngestResponse(
         status="success",
         message="Encrypted telemetry packet stored successfully.",
@@ -422,7 +450,10 @@ def delete_record(index: int) -> DeleteRecordResponse:
     dependencies=[Depends(require_api_key)],
     tags=["consent"],
 )
-def update_athlete_consent(payload: ConsentUpdateRequest) -> ConsentUpdateResponse:
+def update_athlete_consent(
+    request: Request,
+    payload: ConsentUpdateRequest,
+) -> ConsentUpdateResponse:
     """
     Update an athlete's GDPR consent flag in the server-side ``ConsentRegistry``.
 
@@ -449,6 +480,18 @@ def update_athlete_consent(payload: ConsentUpdateRequest) -> ConsentUpdateRespon
         "GDPR consent %s for player_id=%s via /api/v1/athlete/consent",
         action, payload.player_id,
     )
+
+    # Week 6 — Audit: record consent grant/revoke as a distinct, traceable action.
+    client_ip = request.client.host if request.client else "unknown"
+    audit_logger.log_access(
+        user_id="system",
+        user_role="ATHLETE_DASHBOARD",
+        player_id=payload.player_id,
+        action=f"CONSENT_{action}",
+        status="SUCCESS",
+        ip_address=client_ip,
+    )
+
     return ConsentUpdateResponse(
         status="success",
         player_id=payload.player_id,
@@ -466,6 +509,7 @@ def update_athlete_consent(payload: ConsentUpdateRequest) -> ConsentUpdateRespon
     dependencies=[Depends(require_api_key)],
 )
 def authorize_decrypt(
+    http_request: Request,
     request: AuthorizeDecryptRequest,
     user_role: str = Header(
         ...,
@@ -507,6 +551,8 @@ def authorize_decrypt(
     reconstructed with the supplied AES key and ``decrypt_data()`` is called.
     A wrong key still yields HTTP 401 (``cryptography.exceptions.InvalidTag``).
     """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
     # ------------------------------------------------------------------ #
     # GATE 2: GDPR Consent Check                                          #
     # ------------------------------------------------------------------ #
@@ -514,6 +560,16 @@ def authorize_decrypt(
         logger.warning(
             "GDPR consent check FAILED for player_id=%s user_role=%s — access denied.",
             player_id, user_role,
+        )
+        # Week 6 — Audit: log GDPR denial BEFORE raising to guarantee the
+        # entry is always written even if the exception propagates upward.
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=player_id,
+            action="VIEW_BIOMETRIC_DATA",
+            status="DENIED_GDPR_403",
+            ip_address=client_ip,
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -528,6 +584,15 @@ def authorize_decrypt(
             "RBAC check FAILED: user_role=%s is not authorised to decrypt "
             "biometric data for player_id=%s.",
             user_role, player_id,
+        )
+        # Week 6 — Audit: log RBAC denial BEFORE raising.
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=player_id,
+            action="VIEW_BIOMETRIC_DATA",
+            status="DENIED_RBAC_403",
+            ip_address=client_ip,
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -575,7 +640,205 @@ def authorize_decrypt(
         encrypted_packet.get("gateway_id"),
         user_role,
     )
+
+    # Week 6 — Audit: successful decryption — the most sensitive event to trace.
+    audit_logger.log_access(
+        user_id=user_role,
+        user_role=user_role,
+        player_id=player_id,
+        action="VIEW_BIOMETRIC_DATA",
+        status="SUCCESS_200",
+        ip_address=client_ip,
+    )
+
     return AuthorizeDecryptResponse(status="success", decrypted_payload=decrypted_payload)
+
+
+# ---------------------------------------------------------------------------
+# Week 7 — Transfer Escrow & Hashed Ledger Endpoint
+# ---------------------------------------------------------------------------
+
+class TransferRequest(BaseModel):
+    """
+    Request contract for the athlete transfer endpoint.
+
+    Represents a club-to-club player transfer request.  The endpoint applies
+    a five-step gate before committing a block to the local SHA-256 ledger:
+    GDPR consent, escrow verification, payload hashing, ledger append, audit.
+    """
+
+    player_id: str = Field(..., min_length=1, description="Athlete unique identifier.")
+    selling_club: str = Field(..., min_length=1, description="Club initiating the transfer.")
+    buying_club: str = Field(..., min_length=1, description="Club acquiring the athlete.")
+    escrow_deposit_verified: bool = Field(
+        ...,
+        description=(
+            "True = financial escrow deposit confirmed by the transfer authority. "
+            "False = transfer is pending financial settlement and will be rejected."
+        ),
+    )
+
+
+class TransferResponse(BaseModel):
+    """Response returned after a successfully committed transfer block."""
+
+    status: str
+    message: str
+    block: Dict[str, Any]
+    chain_valid: bool
+
+
+@app.post(
+    "/api/v1/transfer/process",
+    response_model=TransferResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_api_key)],
+    tags=["transfer"],
+)
+def process_transfer(
+    http_request: Request,
+    payload: TransferRequest,
+    user_role: str = Header(
+        ...,
+        description="Role of the party initiating the transfer (e.g., CLUB_ADMIN).",
+        alias="X-User-Role",
+    ),
+) -> TransferResponse:
+    """
+    End-to-end athlete transfer endpoint — Week 7 unified pipeline.
+
+    Chains all six prior modules into a single, auditable transfer flow:
+
+    **Gate 1 — API Key Authentication** (``require_api_key`` dependency).
+
+    **Gate 2 — GDPR Consent Check:**
+    Queries the ``ConsentRegistry`` for ``player_id``.  If the athlete has
+    revoked consent, the transfer is immediately blocked with HTTP 403 and
+    a ``DENIED_GDPR_403`` audit entry is written.
+
+    **Gate 3 — Escrow Verification:**
+    If ``escrow_deposit_verified == False``, the transfer is blocked with
+    HTTP 400 and a ``TRANSFER_DENIED_ESCROW`` audit entry is written.
+    No biometric data is accessed or hashed before this gate.
+
+    **Gate 4 — Data Lock & SHA-256 Fingerprint:**
+    Fetches all encrypted records for ``player_id`` from ``mock_db.json``
+    and computes a SHA-256 hash of the JSON-serialised list.  This hash
+    is the tamper-evident fingerprint of the biometric data bundle that
+    accompanies the transfer.
+
+    **Gate 5 — Ledger Commit & Audit:**
+    Calls ``LocalHashedLedger.append_transfer_block()`` to commit the
+    transfer to the immutable SHA-256 chain, then writes a
+    ``TRANSFER_BLOCK_CREATED / SUCCESS_200`` entry to the audit log.
+
+    Returns the committed block and a real-time ``chain_valid`` flag from
+    ``ledger.validate_chain()``, letting the caller verify chain integrity
+    on every transfer.
+    """
+    import hashlib as _hashlib
+    import json as _json
+
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    # ------------------------------------------------------------------ #
+    # GATE 2: GDPR Consent Check                                          #
+    # ------------------------------------------------------------------ #
+    if not consent_registry.is_consent_granted(payload.player_id):
+        logger.warning(
+            "Transfer BLOCKED (GDPR): player_id=%s user_role=%s",
+            payload.player_id, user_role,
+        )
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=payload.player_id,
+            action="TRANSFER_PROCESS",
+            status="DENIED_GDPR_403",
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Transfer Denied: Athlete revoked GDPR consent.",
+        )
+
+    # ------------------------------------------------------------------ #
+    # GATE 3: Escrow Verification                                         #
+    # ------------------------------------------------------------------ #
+    if not payload.escrow_deposit_verified:
+        logger.warning(
+            "Transfer BLOCKED (Escrow): player_id=%s user_role=%s",
+            payload.player_id, user_role,
+        )
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=payload.player_id,
+            action="TRANSFER_PROCESS",
+            status="TRANSFER_DENIED_ESCROW",
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transfer Pending: Escrow deposit not verified.",
+        )
+
+    # ------------------------------------------------------------------ #
+    # GATE 4: Data Lock & SHA-256 Encrypted Payload Fingerprint           #
+    # ------------------------------------------------------------------ #
+    all_records = cloud_server.get_all_stored_records()
+    player_records = [r for r in all_records if r.get("player_id") == payload.player_id]
+    payload_json = _json.dumps(player_records, sort_keys=True, ensure_ascii=True)
+    encrypted_payload_hash = _hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+
+    logger.info(
+        "Transfer data fingerprint for player_id=%s: sha256=%s... (%d records)",
+        payload.player_id, encrypted_payload_hash[:16], len(player_records),
+    )
+
+    # ------------------------------------------------------------------ #
+    # GATE 5: Ledger Commit                                               #
+    # ------------------------------------------------------------------ #
+    committed_block = ledger.append_transfer_block({
+        "player_id": payload.player_id,
+        "selling_club": payload.selling_club,
+        "buying_club": payload.buying_club,
+        "escrow_deposit_verified": payload.escrow_deposit_verified,
+        "encrypted_payload_hash": encrypted_payload_hash,
+    })
+
+    chain_valid = ledger.validate_chain()
+
+    logger.info(
+        "Transfer block #%d committed: player_id=%s %s→%s chain_valid=%s",
+        committed_block["index"],
+        payload.player_id,
+        payload.selling_club,
+        payload.buying_club,
+        chain_valid,
+    )
+
+    # ------------------------------------------------------------------ #
+    # AUDIT: Record every successful transfer commitment.                 #
+    # ------------------------------------------------------------------ #
+    audit_logger.log_access(
+        user_id=user_role,
+        user_role=user_role,
+        player_id=payload.player_id,
+        action="TRANSFER_BLOCK_CREATED",
+        status="SUCCESS_200",
+        ip_address=client_ip,
+    )
+
+    return TransferResponse(
+        status="success",
+        message=(
+            f"Transfer block #{committed_block['index']} committed. "
+            f"{payload.selling_club} → {payload.buying_club} for {payload.player_id}."
+        ),
+        block=committed_block,
+        chain_valid=chain_valid,
+    )
 
 
 if __name__ == "__main__":
