@@ -42,7 +42,6 @@ in ``tearDownClass`` to prevent cross-test pollution.
 
 from __future__ import annotations
 
-import json
 import os
 import unittest
 

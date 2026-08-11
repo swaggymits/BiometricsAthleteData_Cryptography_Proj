@@ -33,10 +33,6 @@ from typing import Any, Dict
 
 from fastapi.testclient import TestClient
 
-# ---------------------------------------------------------------------------
-# Bootstrap isolated test environment BEFORE importing main_server
-# (prevents the module-level singletons from touching production files)
-# ---------------------------------------------------------------------------
 _BENCH_DB = "bench_mock_db.json"
 _BENCH_AUDIT = "bench_audit_log.csv"
 _BENCH_LEDGER = "bench_ledger.json"
@@ -45,21 +41,18 @@ os.environ.setdefault("MOCK_DB_PATH", _BENCH_DB)
 os.environ.setdefault("AUDIT_LOG_PATH", _BENCH_AUDIT)
 os.environ.setdefault("LEDGER_FILE_PATH", _BENCH_LEDGER)
 
-# Force settings cache to reload with bench paths
-import config as _cfg
+import config as _cfg  # noqa: E402
+
 _cfg.get_settings.cache_clear()
 
-import audit_logger as _audit_mod
-import cloud_server as _cs_mod
-import local_hashed_ledger as _ledger_mod
-import main_server as _ms
-
-from audit_logger import AuditLogger
-from cloud_server import ConsentRegistry
-from iot_device import IoTDeviceMock
-from local_hashed_ledger import LocalHashedLedger
-from pipeline_week2 import adapt_to_schema
-from secure_gateway import SecureGateway
+import cloud_server as _cs_mod  # noqa: E402
+import main_server as _ms  # noqa: E402
+from audit_logger import AuditLogger  # noqa: E402
+from cloud_server import ConsentRegistry  # noqa: E402
+from iot_device import IoTDeviceMock  # noqa: E402
+from local_hashed_ledger import LocalHashedLedger  # noqa: E402
+from pipeline_week2 import adapt_to_schema  # noqa: E402
+from secure_gateway import SecureGateway  # noqa: E402
 
 ITERATIONS = 100
 PLAYER_ID = "BENCH-PLAYER-001"
@@ -67,6 +60,7 @@ GATEWAY_ID = "BENCH-GW-001"
 DEVICE_ID = "BENCH-IOT-001"
 API_KEY = _cfg.get_settings().CLOUD_API_KEY
 API_HEADERS = {"X-API-Key": API_KEY}
+
 
 
 def _make_client() -> TestClient:

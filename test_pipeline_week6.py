@@ -43,10 +43,9 @@ are cleaned up in ``tearDownClass`` to prevent cross-test pollution.
 
 from __future__ import annotations
 
-import json
 import os
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
@@ -142,7 +141,7 @@ class TestAuditLoggerUnit(unittest.TestCase):
 
     def test_init_creates_csv_with_headers(self) -> None:
         """AuditLogger.__init__ must create the CSV file with the correct header row."""
-        logger = AuditLogger(log_file_path=self.UNIT_LOG_PATH)
+        AuditLogger(log_file_path=self.UNIT_LOG_PATH)
 
         self.assertTrue(
             os.path.exists(self.UNIT_LOG_PATH),
