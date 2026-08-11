@@ -39,6 +39,7 @@ from typing import Any, Dict, Optional, Set, Union
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from biometric_schema import validate_biometric_payload
 from ecdh_key_exchange import (
     build_session_info,
     derive_session_key,
@@ -46,8 +47,6 @@ from ecdh_key_exchange import (
     generate_ec_keypair,
     serialize_public_key,
 )
-
-from biometric_schema import validate_biometric_payload
 
 
 def build_associated_data(**context: Any) -> bytes:

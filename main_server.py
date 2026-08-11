@@ -65,19 +65,17 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+# Week 8: ECDH hybrid imports
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from audit_logger import AuditLogger
 from cloud_server import AUTHORIZED_DECRYPT_ROLES, CloudServer, ConsentRegistry
 from config import settings
+from ecdh_key_exchange import deserialize_public_key
 from local_hashed_ledger import LocalHashedLedger
 from logging_config import configure_logging, get_logger
 from secure_gateway import SecureGateway
-
-# Week 8: ECDH hybrid imports
-from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from ecdh_key_exchange import build_session_info, derive_session_key, deserialize_public_key
 
 configure_logging()
 logger = get_logger(__name__)
