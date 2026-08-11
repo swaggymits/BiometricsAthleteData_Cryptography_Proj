@@ -2,6 +2,7 @@
 Data Privacy in Elite Performance: Protecting Athlete Biometrics
 Week 3: Cloud Server — Persistent Mock Storage & Data Minimization Layer
 Week 5 Update: GDPR Consent Registry (Access Control & GDPR Consent Toggle)
+Task 1 — Week 8 Update: ECDH Hybrid Packet Storage Support
 
 This module implements two classes:
 
@@ -60,6 +61,15 @@ from typing import Any, Dict, List
 # Fields that are ALLOWED to be persisted. Any payload containing keys outside
 # this allow-list (e.g., accidental plaintext biometric fields) is rejected
 # before it ever reaches disk — a defense-in-depth "storage isolation" gate.
+#
+# Week 8 additions:
+#   ``ephemeral_public_key_pem`` — the gateway's ephemeral NIST P-256 public key
+#     PEM string, required so that the authorized club can reconstruct the ECDH
+#     shared secret and derive the session AES key on the decryption side.
+#   ``club_id`` — the authorized purchasing club identifier, bound into the HKDF
+#     session context; needed to reconstruct ``session_info`` at decrypt time.
+# Both fields are CRYPTOGRAPHIC METADATA (not plaintext biometrics), so their
+# presence does NOT violate the data minimization principle (GDPR Art. 5(1)(c)).
 _ALLOWED_RECORD_FIELDS = {
     "gateway_id",
     "device_id",
@@ -68,6 +78,9 @@ _ALLOWED_RECORD_FIELDS = {
     "nonce",
     "ciphertext",
     "received_at",
+    # Week 8: ECDH hybrid packet fields
+    "ephemeral_public_key_pem",
+    "club_id",
 }
 
 # Fields that MUST be present and MUST be hex strings — the only fields that
