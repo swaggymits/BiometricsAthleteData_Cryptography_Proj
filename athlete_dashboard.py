@@ -1,6 +1,7 @@
 """
 Data Privacy in Elite Performance: Protecting Athlete Biometrics
 Month 2 — Week 5: Access Control & GDPR Consent Toggle
+Task 1 — Week 8 Update: Club Authorization Control Plane (ECDH Key Management)
 
 This module implements the ``AthleteDashboard`` class, which represents the
 logical client-side controls available to an individual athlete. It is a
@@ -32,6 +33,16 @@ Role in the Week 5 Architecture:
     ``player_id`` and a UTC timestamp, making it tamper-evident: the cloud
     server (or an audit log) can verify that the status update was
     legitimately issued by this athlete, not spoofed by a third party.
+
+4.  **Club Authorization Control Plane (NEW — Task 1 / Week 8)**
+    ``authorize_club()`` / ``revoke_club()`` allow the athlete to decide
+    WHICH purchasing clubs are permitted to receive an ECDH session key and
+    decrypt their biometric telemetry.  ``get_authorized_club_key()`` is
+    the gated accessor: it returns the stored PEM only when:
+      (a) the club has been explicitly authorized, AND
+      (b) GDPR consent is currently granted.
+    This gives the athlete sovereign control over their biometric data
+    sharing — far beyond a single global consent toggle.
 
 Security & Compliance Notes:
 -----------------------------
@@ -122,6 +133,146 @@ class AthleteDashboard:
         # HSM, or be derived from an authenticated session token.
         self._signing_key: bytes = os.urandom(32)
         self.signing_key_hex: str = self._signing_key.hex()
+
+        # --- Week 8: Club Authorization Registry ---
+        # Maps club_id → PEM-encoded public key bytes for authorized clubs.
+        # Only clubs in this dict may receive an ECDH session key from the
+        # athlete's gateway. Empty by default — the athlete must explicitly
+        # call authorize_club() to grant access to each purchasing club.
+        self._authorized_clubs: Dict[str, bytes] = {}
+
+    # ------------------------------------------------------------------
+    # Week 8 — Club Authorization Control Plane
+    # ------------------------------------------------------------------
+
+    def authorize_club(
+        self,
+        club_id: str,
+        club_public_key_pem: bytes,
+    ) -> None:
+        """
+        Register a purchasing club's NIST P-256 public key as authorized.
+
+        Once registered, the club's PEM key is stored in
+        ``self._authorized_clubs`` and can be retrieved via
+        ``get_authorized_club_key()`` for use in the ECDH handshake.
+
+        This is the athlete's explicit, per-club consent: they choose
+        exactly which clubs may initiate an ECDH session to receive
+        their encrypted biometric telemetry.
+
+        Args:
+            club_id (str): Unique club identifier (e.g., ``"FC-BUYING-CITY"``).
+            club_public_key_pem (bytes): PEM-encoded NIST P-256 public key
+                                          of the club. Must begin with
+                                          ``b"-----BEGIN PUBLIC KEY-----"``.
+
+        Raises:
+            ValueError: If ``club_id`` is empty or not a string.
+            TypeError: If ``club_public_key_pem`` is not bytes or bytearray.
+        """
+        if not club_id or not isinstance(club_id, str):
+            raise ValueError("club_id must be a non-empty string.")
+        if not isinstance(club_public_key_pem, (bytes, bytearray)):
+            raise TypeError(
+                f"club_public_key_pem must be bytes, got {type(club_public_key_pem).__name__}."
+            )
+        self._authorized_clubs[club_id] = bytes(club_public_key_pem)
+
+    def revoke_club(
+        self,
+        club_id: str,
+    ) -> bool:
+        """
+        Revoke a previously authorized club's access.
+
+        Removes the club's public key from the authorized registry.
+        Subsequent calls to ``get_authorized_club_key(club_id)`` will
+        raise ``PermissionError`` until ``authorize_club()`` is called again.
+
+        This complements GDPR Art. 7(3) (right to withdraw consent) at the
+        per-club level: the athlete can fine-grain revoke a specific club's
+        access without affecting other authorized parties.
+
+        Args:
+            club_id (str): Unique club identifier to revoke.
+
+        Returns:
+            bool: ``True`` if the club was authorized and has been removed;
+                  ``False`` if the club was not in the authorized list
+                  (idempotent — does not raise on double-revoke).
+        """
+        if club_id in self._authorized_clubs:
+            del self._authorized_clubs[club_id]
+            return True
+        return False
+
+    def get_authorized_club_key(
+        self,
+        club_id: str,
+    ) -> bytes:
+        """
+        Return the PEM-encoded public key for an authorized club.
+
+        This is the gated accessor used by the edge gateway before calling
+        ``SecureGateway.encrypt_data_hybrid()``. Two independent conditions
+        must BOTH be true before the key is released:
+
+        1. **Club Authorization**: ``club_id`` must have been registered via
+           ``authorize_club()`` (explicit per-club athlete consent).
+        2. **Global GDPR Consent**: ``privacy_toggle_consent`` must be
+           ``True`` (global biometric access consent). If the athlete has
+           revoked global consent, no club key is returned regardless of
+           individual club authorization status.
+
+        Args:
+            club_id (str): Unique club identifier whose key is requested.
+
+        Returns:
+            bytes: PEM-encoded NIST P-256 public key of the authorized club.
+
+        Raises:
+            PermissionError: If global GDPR consent is revoked
+                             (``privacy_toggle_consent == False``), or if
+                             ``club_id`` has not been authorized via
+                             ``authorize_club()``.
+        """
+        # Gate 1: Global GDPR consent check.
+        if not self.privacy_toggle_consent:
+            raise PermissionError(
+                f"Access Denied: Athlete {self.player_id!r} has revoked global "
+                f"GDPR consent. No club key may be released."
+            )
+        # Gate 2: Per-club authorization check.
+        if club_id not in self._authorized_clubs:
+            raise PermissionError(
+                f"Access Denied: Club {club_id!r} is not authorized by "
+                f"athlete {self.player_id!r}. Call authorize_club() first."
+            )
+        return self._authorized_clubs[club_id]
+
+    def get_authorization_status(self) -> Dict[str, Any]:
+        """
+        Return a snapshot of the current club authorization state.
+
+        Provides a read-only view of which clubs have been authorized,
+        suitable for audit logging, the athlete's dashboard display, or
+        server-side registration checks.
+
+        Returns:
+            Dict[str, Any]: A dictionary containing:
+                - ``player_id``              (str)  Athlete identifier.
+                - ``privacy_toggle_consent`` (bool) Global GDPR consent flag.
+                - ``authorized_clubs``       (list) List of currently authorized
+                  club IDs (public key bytes are NOT included for brevity).
+                - ``authorized_club_count``  (int)  Number of authorized clubs.
+        """
+        return {
+            "player_id": self.player_id,
+            "privacy_toggle_consent": self.privacy_toggle_consent,
+            "authorized_clubs": sorted(self._authorized_clubs.keys()),
+            "authorized_club_count": len(self._authorized_clubs),
+        }
 
     # ------------------------------------------------------------------
     # Public API

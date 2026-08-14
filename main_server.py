@@ -4,6 +4,11 @@ Week 3: Cloud Server REST API (FastAPI)
 Week 5 Update: Access Control & GDPR Consent Toggle (AAA Enforcement)
 Week 6 Update: Audit Logging & Anti-Black Market Protection (AAA Accounting / GDPR Art. 5(2))
 Week 7 Update: Local Hashed Ledger & Transfer Escrow Simulation (Integrity / CIA Triad)
+Task 1 — Week 8 Update: Hybrid ECDH Key Exchange Endpoints
+  — ClubKeyRegistry (in-memory, thread-safe club public-key store)
+  — POST /api/v1/keys/register-club  (athlete authorizes a purchasing club)
+  — POST /api/v1/keys/revoke-club    (athlete revokes a club's authorization)
+  — POST /api/v1/telemetry/authorize-decrypt-hybrid (ECDH session-key decryption)
 
 Exposes the secure ingestion/aggregation surface that a real cloud backend
 would present to edge gateways and authorized analytics consumers.
@@ -60,12 +65,14 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 
+# Week 8: ECDH hybrid imports
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
 from audit_logger import AuditLogger
 from cloud_server import AUTHORIZED_DECRYPT_ROLES, CloudServer, ConsentRegistry
 from config import settings
+from ecdh_key_exchange import deserialize_public_key
 from local_hashed_ledger import LocalHashedLedger
 from logging_config import configure_logging, get_logger
 from secure_gateway import SecureGateway
@@ -137,6 +144,99 @@ audit_logger = AuditLogger(log_file_path=settings.AUDIT_LOG_PATH)
 ledger = LocalHashedLedger(ledger_file_json=settings.LEDGER_FILE_PATH)
 
 
+# ---------------------------------------------------------------------------
+# Task 1 — Week 8: Club Key Registry
+# ---------------------------------------------------------------------------
+
+class ClubKeyRegistry:
+    """
+    Thread-safe in-memory registry mapping ``club_id`` → PEM public key bytes.
+
+    Stores the NIST P-256 public keys that authorized purchasing clubs have
+    submitted for ECDH key exchange. The athlete's ``AthleteDashboard`` acts
+    as the authorization gatekeeper: clubs must be registered here before the
+    gateway can use their key in ``encrypt_data_hybrid()``, and before the
+    ``authorize-decrypt-hybrid`` endpoint will accept their private-key-based
+    decryption requests.
+
+    This is intentionally in-memory only (like ``ConsentRegistry``) for this
+    academic prototype. A production system would persist keys to a dedicated,
+    audited key-management service (e.g., Google Cloud KMS, AWS KMS).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._registry: Dict[str, bytes] = {}  # {club_id: pem_bytes}
+
+    def register_club(
+        self, club_id: str, public_key_pem: str
+    ) -> None:
+        """
+        Store or update the PEM public key for the given club.
+
+        Args:
+            club_id (str): Unique club identifier.
+            public_key_pem (str): PEM-encoded NIST P-256 public key string.
+
+        Raises:
+            ValueError: If ``club_id`` is empty or the PEM cannot be parsed as
+                        a valid EC public key.
+        """
+        if not club_id or not isinstance(club_id, str):
+            raise ValueError("club_id must be a non-empty string.")
+        pem_bytes = public_key_pem.encode("utf-8") if isinstance(public_key_pem, str) else public_key_pem
+        # Validate the key before storing — reject garbage PEM early.
+        try:
+            deserialize_public_key(pem_bytes)
+        except Exception as exc:
+            raise ValueError(
+                f"Invalid EC public key PEM for club {club_id!r}: {exc}"
+            ) from exc
+        with self._lock:
+            self._registry[club_id] = pem_bytes
+
+    def revoke_club(self, club_id: str) -> bool:
+        """
+        Remove a club's public key from the registry.
+
+        Returns:
+            bool: ``True`` if the club was present and removed; ``False`` if not found.
+        """
+        with self._lock:
+            if club_id in self._registry:
+                del self._registry[club_id]
+                return True
+            return False
+
+    def get_public_key_pem(self, club_id: str) -> bytes:
+        """
+        Retrieve the PEM public key for a registered club.
+
+        Raises:
+            KeyError: If ``club_id`` is not registered.
+        """
+        with self._lock:
+            if club_id not in self._registry:
+                raise KeyError(
+                    f"Club {club_id!r} is not registered in the ClubKeyRegistry."
+                )
+            return self._registry[club_id]
+
+    def is_registered(self, club_id: str) -> bool:
+        """Return True if the club has a registered public key."""
+        with self._lock:
+            return club_id in self._registry
+
+    def get_all_clubs(self) -> Dict[str, Any]:
+        """Return a snapshot of all registered club IDs (keys omitted for brevity)."""
+        with self._lock:
+            return {"registered_clubs": sorted(self._registry.keys())}
+
+
+# Module-level singleton — same pattern as consent_registry.
+club_key_registry = ClubKeyRegistry()
+
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     """
@@ -188,8 +288,15 @@ def _is_hex(value: str) -> bool:
 class TelemetryIngestRequest(BaseModel):
     """
     Strict Pydantic contract for the hex-encoded encrypted packet produced by
-    `SecureGateway.encrypt_data()`. Deliberately contains NO plaintext
-    biometric fields — enforcing data minimization at the API boundary.
+    `SecureGateway.encrypt_data()` or `SecureGateway.encrypt_data_hybrid()`.
+    Deliberately contains NO plaintext biometric fields — enforcing data
+    minimization at the API boundary.
+
+    Week 8 additions (optional fields for ECDH hybrid packets):
+    - ``ephemeral_public_key_pem``: The gateway's ephemeral NIST P-256 public
+      key (PEM string). Only present in hybrid-encrypted packets.
+    - ``club_id``: The authorized purchasing club identifier bound into the
+      HKDF session context. Only present in hybrid-encrypted packets.
     """
 
     gateway_id: str = Field(..., min_length=1, description="Originating edge gateway identifier.")
@@ -198,6 +305,15 @@ class TelemetryIngestRequest(BaseModel):
     sent_at: Optional[str] = Field(None, description="UTC ISO-8601 timestamp bound into the AAD.")
     nonce: str = Field(..., description="Hex-encoded 96-bit AES-GCM nonce.")
     ciphertext: str = Field(..., description="Hex-encoded AES-256-GCM ciphertext (includes auth tag).")
+    # Week 8: ECDH hybrid fields (optional — absent for legacy symmetric packets)
+    ephemeral_public_key_pem: Optional[str] = Field(
+        None,
+        description="(Hybrid only) PEM-encoded NIST P-256 ephemeral public key of the originating gateway.",
+    )
+    club_id: Optional[str] = Field(
+        None,
+        description="(Hybrid only) Authorized purchasing club identifier.",
+    )
 
     @field_validator("nonce", "ciphertext")
     @classmethod
@@ -845,3 +961,379 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("main_server:app", host=settings.HOST, port=settings.PORT, reload=True)
+
+
+# ---------------------------------------------------------------------------
+# Task 1 — Week 8: ECDH Hybrid Key Management & Decryption Endpoints
+# ---------------------------------------------------------------------------
+
+class ClubKeyRegisterRequest(BaseModel):
+    """
+    Request contract for the club public-key registration endpoint.
+
+    An athlete (via their ``AthleteDashboard`` client) submits the purchasing
+    club's NIST P-256 public key PEM.  The server stores it in the
+    ``ClubKeyRegistry`` so the gateway can use it for ECDH encryption and
+    the ``authorize-decrypt-hybrid`` endpoint can validate decryption requests.
+    """
+
+    club_id: str = Field(..., min_length=1, description="Unique purchasing club identifier.")
+    player_id: str = Field(..., min_length=1, description="Athlete authorizing the club.")
+    club_public_key_pem: str = Field(
+        ...,
+        description="PEM-encoded NIST P-256 public key of the club (begins with '-----BEGIN PUBLIC KEY-----').",
+    )
+
+
+class ClubKeyRegisterResponse(BaseModel):
+    """Confirmation returned after successfully registering a club key."""
+
+    status: str
+    club_id: str
+    player_id: str
+    message: str
+
+
+class ClubKeyRevokeRequest(BaseModel):
+    """Request contract for revoking a club's registered public key."""
+
+    club_id: str = Field(..., min_length=1, description="Club whose key is being revoked.")
+    player_id: str = Field(..., min_length=1, description="Athlete revoking the authorization.")
+
+
+class ClubKeyRevokeResponse(BaseModel):
+    """Confirmation returned after a club key revocation attempt."""
+
+    status: str
+    club_id: str
+    was_registered: bool
+    message: str
+
+
+class AuthorizeDecryptHybridRequest(BaseModel):
+    """
+    Request contract for hybrid ECDH decryption of a biometric record.
+
+    The requesting club supplies:
+    - ``record``: The full hybrid-encrypted packet (including
+      ``ephemeral_public_key_pem`` and ``club_id``).
+    - ``club_private_key_pem``: The club's PEM-encoded NIST P-256 private key,
+      used server-side to mirror the ECDH exchange and derive the session key.
+
+    Security note for thesis: In a production deployment, the club's private
+    key would NEVER leave their HSM or key vault. The decryption operation
+    would be performed locally (client-side) using the session key the club
+    derives independently. This server-side decryption path is an academic
+    simplification demonstrating the key-derivation correctness.
+    """
+
+    record: TelemetryIngestRequest = Field(..., description="Hybrid-encrypted packet to decrypt.")
+    club_private_key_pem: str = Field(
+        ...,
+        description="PEM-encoded NIST P-256 private key of the authorized club.",
+    )
+    max_age_seconds: Optional[float] = Field(
+        None, description="Optional freshness window to reject stale/replayed packets."
+    )
+
+
+class AuthorizeDecryptHybridResponse(BaseModel):
+    """Response carrying the decrypted plaintext biometric payload (hybrid path)."""
+
+    status: str
+    decrypted_payload: Any
+    club_id: str
+
+
+@app.post(
+    "/api/v1/keys/register-club",
+    response_model=ClubKeyRegisterResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_api_key)],
+    tags=["ecdh-keys"],
+)
+def register_club_key(
+    http_request: Request,
+    payload: ClubKeyRegisterRequest,
+) -> ClubKeyRegisterResponse:
+    """
+    Register a purchasing club's NIST P-256 public key (Task 1 / Week 8).
+
+    This endpoint is called by the athlete (via their ``AthleteDashboard``)
+    to authorize a specific purchasing club to receive their encrypted
+    biometric telemetry. The club's public key PEM is validated and stored
+    in the in-process ``ClubKeyRegistry``.
+
+    Once registered, the club's key can be used by the edge gateway in
+    ``POST /api/v1/telemetry/ingest`` (hybrid packets) and the club can
+    decrypt via ``POST /api/v1/telemetry/authorize-decrypt-hybrid``.
+
+    **Gate 1 — API Key Authentication** (``require_api_key`` dependency).
+
+    **Gate 2 — GDPR Consent Check**: If the athlete has revoked consent,
+    the registration is blocked with HTTP 403.
+
+    Requires a valid ``X-API-Key`` header.
+    """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    # Gate 2: GDPR consent — no club registration while consent is revoked.
+    if not consent_registry.is_consent_granted(payload.player_id):
+        logger.warning(
+            "Club key registration BLOCKED (GDPR): player_id=%s club_id=%s",
+            payload.player_id, payload.club_id,
+        )
+        audit_logger.log_access(
+            user_id="system",
+            user_role="ATHLETE_DASHBOARD",
+            player_id=payload.player_id,
+            action="CLUB_KEY_REGISTER",
+            status="DENIED_GDPR_403",
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Club key registration denied: athlete has revoked GDPR consent.",
+        )
+
+    try:
+        club_key_registry.register_club(payload.club_id, payload.club_public_key_pem)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    logger.info(
+        "Club key REGISTERED: club_id=%s player_id=%s",
+        payload.club_id, payload.player_id,
+    )
+    audit_logger.log_access(
+        user_id="system",
+        user_role="ATHLETE_DASHBOARD",
+        player_id=payload.player_id,
+        action="CLUB_KEY_REGISTER",
+        status="SUCCESS",
+        ip_address=client_ip,
+    )
+
+    return ClubKeyRegisterResponse(
+        status="success",
+        club_id=payload.club_id,
+        player_id=payload.player_id,
+        message=(
+            f"Club {payload.club_id!r} public key registered. "
+            f"ECDH hybrid encryption is now enabled for player {payload.player_id!r}."
+        ),
+    )
+
+
+@app.post(
+    "/api/v1/keys/revoke-club",
+    response_model=ClubKeyRevokeResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_api_key)],
+    tags=["ecdh-keys"],
+)
+def revoke_club_key(
+    http_request: Request,
+    payload: ClubKeyRevokeRequest,
+) -> ClubKeyRevokeResponse:
+    """
+    Revoke a purchasing club's public key (Task 1 / Week 8).
+
+    Removes the club's key from the ``ClubKeyRegistry``.  Subsequent hybrid
+    encrypt or ``authorize-decrypt-hybrid`` calls for this club will be
+    rejected.  This implements per-club consent revocation at the
+    cryptographic level — complementing the global GDPR consent toggle.
+
+    Idempotent: revoking an already-unregistered club returns HTTP 200 with
+    ``was_registered=False`` rather than raising an error.
+
+    Requires a valid ``X-API-Key`` header.
+    """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    was_registered = club_key_registry.revoke_club(payload.club_id)
+
+    logger.info(
+        "Club key REVOKED: club_id=%s player_id=%s was_registered=%s",
+        payload.club_id, payload.player_id, was_registered,
+    )
+    audit_logger.log_access(
+        user_id="system",
+        user_role="ATHLETE_DASHBOARD",
+        player_id=payload.player_id,
+        action="CLUB_KEY_REVOKE",
+        status="SUCCESS",
+        ip_address=client_ip,
+    )
+
+    return ClubKeyRevokeResponse(
+        status="success",
+        club_id=payload.club_id,
+        was_registered=was_registered,
+        message=(
+            f"Club {payload.club_id!r} key {'revoked' if was_registered else 'was not registered'}. "
+            f"ECDH decryption is now {'blocked' if was_registered else 'already blocked'} for this club."
+        ),
+    )
+
+
+@app.post(
+    "/api/v1/telemetry/authorize-decrypt-hybrid",
+    response_model=AuthorizeDecryptHybridResponse,
+    dependencies=[Depends(require_api_key)],
+    tags=["ecdh-keys"],
+)
+def authorize_decrypt_hybrid(
+    http_request: Request,
+    request: AuthorizeDecryptHybridRequest,
+    user_role: str = Header(
+        ...,
+        description="Requesting party role (e.g., TEAM_DOCTOR, CLUB_ADMIN).",
+        alias="X-User-Role",
+    ),
+    player_id: str = Header(
+        ...,
+        description="Athlete player ID whose record is being decrypted.",
+        alias="X-Player-Id",
+    ),
+) -> AuthorizeDecryptHybridResponse:
+    """
+    Authorized ECDH hybrid decryption of a biometric record (Task 1 / Week 8).
+
+    Implements the club-side of the ECDH handshake on the server to demonstrate
+    key-derivation correctness.  Passes through FOUR security gates:
+
+    **Gate 1 — API Key Authentication** (``require_api_key`` dependency).
+
+    **Gate 2 — GDPR Consent Check**:
+    Reads ``player_id`` from ``X-Player-Id`` header and queries the
+    ``ConsentRegistry``.  If consent is revoked, returns HTTP 403.
+
+    **Gate 3 — Club Authorization Check**:
+    Verifies that the ``club_id`` embedded in the encrypted packet is
+    currently registered in the ``ClubKeyRegistry``. An unregistered
+    (or revoked) club returns HTTP 403. This ensures that even if a club
+    obtains the raw ciphertext out-of-band, they cannot decrypt it unless
+    the athlete has explicitly authorized them.
+
+    **Gate 4 — ECDH Session-Key Derivation & AES-256-GCM Decryption**:
+    Uses the club's submitted private key PEM to mirror the ECDH exchange,
+    derive the session AES-256 key, and decrypt the payload. A wrong or
+    mismatched key returns HTTP 401.
+    """
+    client_ip = http_request.client.host if http_request.client else "unknown"
+
+    # Validate that this is actually a hybrid packet.
+    encrypted_packet = request.record.model_dump(exclude_none=True)
+    if "ephemeral_public_key_pem" not in encrypted_packet or "club_id" not in encrypted_packet:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Packet is missing 'ephemeral_public_key_pem' or 'club_id'. "
+                   "Use /api/v1/telemetry/authorize-decrypt for legacy symmetric packets.",
+        )
+
+    club_id: str = encrypted_packet["club_id"]
+
+    # ------------------------------------------------------------------ #
+    # GATE 2: GDPR Consent Check                                          #
+    # ------------------------------------------------------------------ #
+    if not consent_registry.is_consent_granted(player_id):
+        logger.warning(
+            "Hybrid decrypt BLOCKED (GDPR): player_id=%s club_id=%s user_role=%s",
+            player_id, club_id, user_role,
+        )
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=player_id,
+            action="VIEW_BIOMETRIC_DATA_HYBRID",
+            status="DENIED_GDPR_403",
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: Athlete has revoked biometric consent under GDPR.",
+        )
+
+    # ------------------------------------------------------------------ #
+    # GATE 3: Club Authorization Check                                    #
+    # ------------------------------------------------------------------ #
+    if not club_key_registry.is_registered(club_id):
+        logger.warning(
+            "Hybrid decrypt BLOCKED (Club not authorized): club_id=%s player_id=%s",
+            club_id, player_id,
+        )
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=player_id,
+            action="VIEW_BIOMETRIC_DATA_HYBRID",
+            status="DENIED_CLUB_NOT_AUTHORIZED_403",
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access Denied: Club {club_id!r} is not authorized by the athlete.",
+        )
+
+    # ------------------------------------------------------------------ #
+    # GATE 4: ECDH Session-Key Derivation & AES-256-GCM Decryption        #
+    # ------------------------------------------------------------------ #
+    max_age = request.max_age_seconds if request.max_age_seconds is not None else settings.MAX_PACKET_AGE_SECONDS
+
+    try:
+        club_private_key_pem_bytes = request.club_private_key_pem.encode("utf-8")
+        gateway = SecureGateway(
+            gateway_id=encrypted_packet["gateway_id"]
+        )
+        decrypted_payload = gateway.decrypt_data_hybrid(
+            encrypted_packet,
+            club_private_key_pem=club_private_key_pem_bytes,
+            max_age_seconds=max_age,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # cryptography.exceptions.InvalidTag, etc.
+        logger.warning(
+            "Hybrid decryption FAILED for player_id=%s club_id=%s: %s",
+            player_id, club_id, exc.__class__.__name__,
+        )
+        audit_logger.log_access(
+            user_id=user_role,
+            user_role=user_role,
+            player_id=player_id,
+            action="VIEW_BIOMETRIC_DATA_HYBRID",
+            status="DENIED_INVALID_KEY_401",
+            ip_address=client_ip,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Hybrid decryption/authentication failed: {exc.__class__.__name__}",
+        ) from exc
+
+    logger.info(
+        "Hybrid decryption SUCCEEDED: player_id=%s club_id=%s user_role=%s",
+        player_id, club_id, user_role,
+    )
+    audit_logger.log_access(
+        user_id=user_role,
+        user_role=user_role,
+        player_id=player_id,
+        action="VIEW_BIOMETRIC_DATA_HYBRID",
+        status="SUCCESS_200",
+        ip_address=client_ip,
+    )
+
+    return AuthorizeDecryptHybridResponse(
+        status="success",
+        decrypted_payload=decrypted_payload,
+        club_id=club_id,
+    )
