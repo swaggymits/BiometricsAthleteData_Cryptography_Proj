@@ -218,7 +218,7 @@ class TestLedgerIntegrity(unittest.TestCase):
         """validate_chain() must return True on the production ledger."""
         if not os.path.exists(LEDGER_PATH):
             self.skipTest(f"'{LEDGER_PATH}' not found.")
-        from local_hashed_ledger import LocalHashedLedger
+        from ledger.local_hashed_ledger import LocalHashedLedger
         ledger = LocalHashedLedger(ledger_file_json=LEDGER_PATH)
         self.assertTrue(
             ledger.validate_chain(),
@@ -229,7 +229,7 @@ class TestLedgerIntegrity(unittest.TestCase):
         """ledger_file.json must contain at least the genesis block (index 0)."""
         if not os.path.exists(LEDGER_PATH):
             self.skipTest(f"'{LEDGER_PATH}' not found.")
-        from local_hashed_ledger import LocalHashedLedger
+        from ledger.local_hashed_ledger import LocalHashedLedger
         ledger = LocalHashedLedger(ledger_file_json=LEDGER_PATH)
         chain = ledger.get_chain()
         self.assertGreaterEqual(len(chain), 1, "Ledger must have at least a genesis block.")

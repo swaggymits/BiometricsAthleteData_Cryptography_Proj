@@ -6,8 +6,8 @@ import unittest
 
 from cryptography.exceptions import InvalidTag
 
-from biometric_schema import validate_biometric_payload
-from secure_gateway import SecureGateway
+from core.biometric_schema import validate_biometric_payload
+from core.secure_gateway import SecureGateway
 
 
 class TestBiometricSchemaValidation(unittest.TestCase):

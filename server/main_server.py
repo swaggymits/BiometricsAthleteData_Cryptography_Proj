@@ -69,13 +69,13 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from audit_logger import AuditLogger
-from cloud_server import AUTHORIZED_DECRYPT_ROLES, CloudServer, ConsentRegistry
-from config import settings
-from ecdh_key_exchange import deserialize_public_key
-from local_hashed_ledger import LocalHashedLedger
-from logging_config import configure_logging, get_logger
-from secure_gateway import SecureGateway
+from core.audit_logger import AuditLogger
+from .cloud_server import AUTHORIZED_DECRYPT_ROLES, CloudServer, ConsentRegistry
+from .config import settings
+from core.ecdh_key_exchange import deserialize_public_key
+from ledger.local_hashed_ledger import LocalHashedLedger
+from .logging_config import configure_logging, get_logger
+from core.secure_gateway import SecureGateway
 
 configure_logging()
 logger = get_logger(__name__)

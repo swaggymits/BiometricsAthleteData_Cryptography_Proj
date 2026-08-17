@@ -52,12 +52,12 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 # Allow running from project root without installing as package
 # ---------------------------------------------------------------------------
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from biometric_schema import validate_biometric_payload
-from secure_gateway import SecureGateway
-from audit_logger import AuditLogger
-from zenodo_dataset_loader import ZenodoDatasetLoader, DATASET_DOI, DATASET_CITATION
+from core.biometric_schema import validate_biometric_payload
+from core.secure_gateway import SecureGateway
+from core.audit_logger import AuditLogger
+from dataset.zenodo_dataset_loader import ZenodoDatasetLoader, DATASET_DOI, DATASET_CITATION
 
 # ---------------------------------------------------------------------------
 # ANSI colour codes (degrade gracefully on Windows)

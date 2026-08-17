@@ -46,12 +46,12 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 # ``httpx.AsyncClient(app=app, ...)``.  We must monkey-patch
 # ``config.settings.MOCK_DB_PATH`` BEFORE importing ``main_server`` so the
 # CloudServer inside it uses our temp db file.
-import config as _config_module
+import server.config as _config_module
 
 # ── project imports ────────────────────────────────────────────────────────────
-from iot_device import IoTDeviceMock
-from pipeline_week2 import adapt_to_schema  # reuse existing adapter
-from secure_gateway import SecureGateway
+from edge.iot_device import IoTDeviceMock
+from edge.pipeline_week2 import adapt_to_schema  # reuse existing adapter
+from core.secure_gateway import SecureGateway
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -219,7 +219,7 @@ async def run_pipeline(ticks: int = 20) -> None:
 
     import importlib
 
-    import main_server as _ms_module
+    import server.main_server as _ms_module
     importlib.reload(_ms_module)          # re-bind CloudServer to temp db
     from main_server import app  # noqa: E402  (runtime import needed)
 
