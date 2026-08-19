@@ -1,0 +1,78 @@
+{
+  "benchmark_1_e2e_latency": {
+    "n_iterations": 50,
+    "e2e_total": {
+      "mean_ms": 4.804,
+      "median_ms": 3.875,
+      "p95_ms": 11.575,
+      "p99_ms": 24.042,
+      "min_ms": 3.442,
+      "max_ms": 24.042
+    },
+    "phase_encrypt": {
+      "mean_ms": 0.044,
+      "median_ms": 0.037,
+      "p95_ms": 0.1,
+      "p99_ms": 0.142,
+      "min_ms": 0.032,
+      "max_ms": 0.142
+    },
+    "phase_ingest": {
+      "mean_ms": 2.706,
+      "median_ms": 2.164,
+      "p95_ms": 5.841,
+      "p99_ms": 17.267,
+      "min_ms": 1.819,
+      "max_ms": 17.267
+    },
+    "phase_decrypt": {
+      "mean_ms": 2.054,
+      "median_ms": 1.644,
+      "p95_ms": 5.68,
+      "p99_ms": 6.882,
+      "min_ms": 1.471,
+      "max_ms": 6.882
+    }
+  },
+  "benchmark_2_scalability_throughput": {
+    "10": {
+      "concurrent_devices": 10,
+      "total_requests": 50,
+      "successful_requests": 50,
+      "failed_requests": 0,
+      "wall_time_s": 0.096,
+      "req_per_sec": 523.15,
+      "avg_ingest_ms": 17.59,
+      "p95_ingest_ms": 26.74
+    },
+    "50": {
+      "concurrent_devices": 50,
+      "total_requests": 250,
+      "successful_requests": 250,
+      "failed_requests": 0,
+      "wall_time_s": 0.802,
+      "req_per_sec": 311.71,
+      "avg_ingest_ms": 147.36,
+      "p95_ingest_ms": 181.55
+    },
+    "100": {
+      "concurrent_devices": 100,
+      "total_requests": 500,
+      "successful_requests": 500,
+      "failed_requests": 0,
+      "wall_time_s": 3.093,
+      "req_per_sec": 161.66,
+      "avg_ingest_ms": 587.0,
+      "p95_ingest_ms": 711.14
+    }
+  },
+  "benchmark_3_gdpr_revoke_edge_case": {
+    "pre_revoke_ingestions": 10,
+    "post_revoke_ingestions": 10,
+    "decrypt_attempts_post_revoke": 10,
+    "decrypt_403_count": 10,
+    "decrypt_200_count": 0,
+    "assertion_passed": true,
+    "assertion_detail": "All 10/10 post-revoke decrypt attempts returned HTTP 403 \u2014 GDPR gate is immediate and race-condition-safe."
+  }
+}
