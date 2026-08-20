@@ -37,11 +37,12 @@ USER appuser
 
 ENV ENVIRONMENT=production \
     HOST=0.0.0.0 \
-    PORT=8000
+    PORT=8000 \
+    PYTHONPATH=/app
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)" || exit 1
 
-CMD ["uvicorn", "main_server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "server.main_server:app", "--host", "0.0.0.0", "--port", "8000"]
