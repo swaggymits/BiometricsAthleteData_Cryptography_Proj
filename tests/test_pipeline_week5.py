@@ -59,14 +59,14 @@ import unittest
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi.testclient import TestClient
 
-import cloud_server as cloud_server_module
-import main_server
-from athlete_dashboard import AthleteDashboard
-from cloud_server import ConsentRegistry
-from config import settings
-from iot_device import IoTDeviceMock
-from pipeline_week2 import adapt_to_schema
-from secure_gateway import SecureGateway
+import server.cloud_server as cloud_server_module
+import server.main_server as main_server
+from evaluation.athlete_dashboard import AthleteDashboard
+from server.cloud_server import ConsentRegistry
+from server.config import settings
+from edge.iot_device import IoTDeviceMock
+from edge.pipeline_week2 import adapt_to_schema
+from core.secure_gateway import SecureGateway
 
 # ---------------------------------------------------------------------------
 # Shared test fixtures

@@ -30,7 +30,7 @@ def run_all_tests() -> bool:
     print("=" * 80)
 
     loader = unittest.TestLoader()
-    suite = loader.discover(start_dir=".", pattern="test_*.py")
+    suite = loader.discover(start_dir="tests", pattern="test_*.py")
 
     runner = unittest.TextTestRunner(verbosity=2)
     result = runner.run(suite)
@@ -44,7 +44,7 @@ def run_pipeline_demo() -> None:
     print("STEP 2/2: Running Week 2 IoT -> SecureGateway transmission pipeline")
     print("=" * 80 + "\n")
 
-    from pipeline_week2 import run_pipeline
+    from edge.pipeline_week2 import run_pipeline
     run_pipeline(ticks=5, delay_seconds=1.0)
 
 

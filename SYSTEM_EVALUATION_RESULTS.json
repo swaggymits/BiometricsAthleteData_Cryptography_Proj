@@ -1,0 +1,78 @@
+{
+  "benchmark_1_e2e_latency": {
+    "n_iterations": 50,
+    "e2e_total": {
+      "mean_ms": 16.603,
+      "median_ms": 15.903,
+      "p95_ms": 21.97,
+      "p99_ms": 33.118,
+      "min_ms": 10.129,
+      "max_ms": 33.118
+    },
+    "phase_encrypt": {
+      "mean_ms": 0.072,
+      "median_ms": 0.064,
+      "p95_ms": 0.12,
+      "p99_ms": 0.317,
+      "min_ms": 0.052,
+      "max_ms": 0.317
+    },
+    "phase_ingest": {
+      "mean_ms": 10.996,
+      "median_ms": 10.403,
+      "p95_ms": 16.638,
+      "p99_ms": 23.041,
+      "min_ms": 5.277,
+      "max_ms": 23.041
+    },
+    "phase_decrypt": {
+      "mean_ms": 5.535,
+      "median_ms": 5.244,
+      "p95_ms": 6.985,
+      "p99_ms": 12.599,
+      "min_ms": 4.709,
+      "max_ms": 12.599
+    }
+  },
+  "benchmark_2_scalability_throughput": {
+    "10": {
+      "concurrent_devices": 10,
+      "total_requests": 50,
+      "successful_requests": 50,
+      "failed_requests": 0,
+      "wall_time_s": 0.547,
+      "req_per_sec": 91.47,
+      "avg_ingest_ms": 101.0,
+      "p95_ingest_ms": 148.22
+    },
+    "50": {
+      "concurrent_devices": 50,
+      "total_requests": 250,
+      "successful_requests": 250,
+      "failed_requests": 0,
+      "wall_time_s": 10.378,
+      "req_per_sec": 24.09,
+      "avg_ingest_ms": 1968.56,
+      "p95_ingest_ms": 2750.23
+    },
+    "100": {
+      "concurrent_devices": 100,
+      "total_requests": 500,
+      "successful_requests": 500,
+      "failed_requests": 0,
+      "wall_time_s": 59.257,
+      "req_per_sec": 8.44,
+      "avg_ingest_ms": 11580.7,
+      "p95_ingest_ms": 15311.41
+    }
+  },
+  "benchmark_3_gdpr_revoke_edge_case": {
+    "pre_revoke_ingestions": 10,
+    "post_revoke_ingestions": 10,
+    "decrypt_attempts_post_revoke": 10,
+    "decrypt_403_count": 10,
+    "decrypt_200_count": 0,
+    "assertion_passed": true,
+    "assertion_detail": "All 10/10 post-revoke decrypt attempts returned HTTP 403 \u2014 GDPR gate is immediate and race-condition-safe."
+  }
+}

@@ -29,8 +29,8 @@ from typing import Any, Dict
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from iot_device import IoTDeviceMock
-from secure_gateway import SecureGateway
+from edge.iot_device import IoTDeviceMock
+from core.secure_gateway import SecureGateway
 
 
 def adapt_to_schema(raw_reading: Dict[str, Any]) -> Dict[str, Any]:

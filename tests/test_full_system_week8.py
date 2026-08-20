@@ -29,6 +29,7 @@ Week 8 Smoke Tests
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import unittest
@@ -37,11 +38,11 @@ import unittest
 # Prior-week test modules (collected and run as a sub-suite)
 # ---------------------------------------------------------------------------
 PRIOR_WEEK_MODULES = [
-    "test_week1",
-    "test_pipeline_week3",
-    "test_pipeline_week5",
-    "test_pipeline_week6",
-    "test_pipeline_week7",
+    "tests.test_week1",
+    "tests.test_pipeline_week3",
+    "tests.test_pipeline_week5",
+    "tests.test_pipeline_week6",
+    "tests.test_pipeline_week7",
 ]
 
 EVALUATION_RESULTS_PATH = "EVALUATION_RESULTS.json"
@@ -60,6 +61,7 @@ def _load_evaluation_results() -> dict:
 # Prior-week regression suite (run as a single test)
 # ===========================================================================
 
+
 class TestPriorWeeksRegression(unittest.TestCase):
     """
     Runs all 114 prior-week tests (Weeks 1–7) inside a single assertion.
@@ -77,29 +79,34 @@ class TestPriorWeeksRegression(unittest.TestCase):
 
         for module_name in PRIOR_WEEK_MODULES:
             try:
-                module_suite = loader.loadTestsFromName(module_name)
+                mod = importlib.import_module(module_name)
+                module_suite = loader.loadTestsFromModule(mod)
                 suite.addTests(module_suite)
             except ModuleNotFoundError as exc:
                 self.fail(f"Could not import test module '{module_name}': {exc}")
 
         # Run in a buffer so prior-week stdout does not pollute pytest output.
-        runner = unittest.TextTestRunner(stream=open(os.devnull, "w"), verbosity=0)
-        result = runner.run(suite)
+        with open(os.devnull, "w") as devnull:
+            runner = unittest.TextTestRunner(stream=devnull, verbosity=0)
+            result = runner.run(suite)
 
         total = result.testsRun
         failures = len(result.failures)
         errors = len(result.errors)
 
         if not result.wasSuccessful():
-            msgs = [f"Prior-week regression FAILED: {total} tests run, "
-                    f"{failures} failures, {errors} errors."]
+            msgs = [
+                f"Prior-week regression FAILED: {total} tests run, "
+                f"{failures} failures, {errors} errors."
+            ]
             for test, tb in result.failures + result.errors:
                 msgs.append(f"\n  FAIL: {test}\n  {tb[:500]}")
             self.fail("\n".join(msgs))
 
         # Confirm expected test count hasn't shrunk unexpectedly.
         self.assertGreaterEqual(
-            total, 114,
+            total,
+            114,
             f"Expected ≥ 114 prior-week tests but only {total} ran — possible import error.",
         )
 
@@ -107,6 +114,7 @@ class TestPriorWeeksRegression(unittest.TestCase):
 # ===========================================================================
 # Week 8 Smoke Tests
 # ===========================================================================
+
 
 class TestEvaluationResultsIntegrity(unittest.TestCase):
     """Validate the contents and metric values of EVALUATION_RESULTS.json."""
@@ -155,8 +163,13 @@ class TestEvaluationResultsIntegrity(unittest.TestCase):
         if not self.results:
             self.skipTest("EVALUATION_RESULTS.json is empty or missing.")
         st = self.results.get("storage_overhead", {})
-        for key in ("raw_biometric_bytes", "ciphertext_bytes", "audit_row_bytes",
-                    "ledger_block_bytes", "ciphertext_overhead_pct"):
+        for key in (
+            "raw_biometric_bytes",
+            "ciphertext_bytes",
+            "audit_row_bytes",
+            "ledger_block_bytes",
+            "ciphertext_overhead_pct",
+        ):
             self.assertIn(key, st, f"Storage overhead field '{key}' missing.")
 
     def test_successful_request_rate_is_100_percent(self) -> None:
@@ -182,7 +195,8 @@ class TestEvaluationResultsIntegrity(unittest.TestCase):
             self.skipTest("EVALUATION_RESULTS.json is empty or missing.")
         overhead = self.results.get("encryption_overhead_ms", 999)
         self.assertLess(
-            overhead, 2.0,
+            overhead,
+            2.0,
             f"Encryption overhead {overhead:.3f} ms exceeds 2 ms threshold.",
         )
 
@@ -193,7 +207,8 @@ class TestEvaluationResultsIntegrity(unittest.TestCase):
         rt = self.results.get("avg_response_times_ms", {})
         for ep, ms in rt.items():
             self.assertLess(
-                ms, 20.0,
+                ms,
+                20.0,
                 f"Endpoint '{ep}' avg response time {ms:.2f} ms exceeds 20 ms.",
             )
 
@@ -218,7 +233,8 @@ class TestLedgerIntegrity(unittest.TestCase):
         """validate_chain() must return True on the production ledger."""
         if not os.path.exists(LEDGER_PATH):
             self.skipTest(f"'{LEDGER_PATH}' not found.")
-        from local_hashed_ledger import LocalHashedLedger
+        from ledger.local_hashed_ledger import LocalHashedLedger
+
         ledger = LocalHashedLedger(ledger_file_json=LEDGER_PATH)
         self.assertTrue(
             ledger.validate_chain(),
@@ -229,7 +245,8 @@ class TestLedgerIntegrity(unittest.TestCase):
         """ledger_file.json must contain at least the genesis block (index 0)."""
         if not os.path.exists(LEDGER_PATH):
             self.skipTest(f"'{LEDGER_PATH}' not found.")
-        from local_hashed_ledger import LocalHashedLedger
+        from ledger.local_hashed_ledger import LocalHashedLedger
+
         ledger = LocalHashedLedger(ledger_file_json=LEDGER_PATH)
         chain = ledger.get_chain()
         self.assertGreaterEqual(len(chain), 1, "Ledger must have at least a genesis block.")

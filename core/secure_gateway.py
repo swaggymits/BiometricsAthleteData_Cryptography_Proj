@@ -39,8 +39,8 @@ from typing import Any, Dict, Optional, Set, Union
 from cryptography.hazmat.primitives.asymmetric.ec import EllipticCurvePublicKey
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from biometric_schema import validate_biometric_payload
-from ecdh_key_exchange import (
+from core.biometric_schema import validate_biometric_payload
+from core.ecdh_key_exchange import (
     build_session_info,
     derive_session_key,
     deserialize_public_key,

@@ -7,7 +7,7 @@ deployments (dev/staging/prod) lives in the environment, NOT hardcoded in
 source code. This is standard practice for production-grade services.
 
 Usage:
-    from config import settings
+    from server.config import settings
     settings.CLOUD_API_KEY
 """
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import sys
 
-from config import settings
+from .config import settings
 
 _LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 

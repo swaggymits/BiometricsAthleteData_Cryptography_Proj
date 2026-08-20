@@ -41,18 +41,18 @@ os.environ.setdefault("MOCK_DB_PATH", _BENCH_DB)
 os.environ.setdefault("AUDIT_LOG_PATH", _BENCH_AUDIT)
 os.environ.setdefault("LEDGER_FILE_PATH", _BENCH_LEDGER)
 
-import config as _cfg  # noqa: E402
+import server.config as _cfg  # noqa: E402
 
 _cfg.get_settings.cache_clear()
 
-import cloud_server as _cs_mod  # noqa: E402
-import main_server as _ms  # noqa: E402
-from audit_logger import AuditLogger  # noqa: E402
-from cloud_server import ConsentRegistry  # noqa: E402
-from iot_device import IoTDeviceMock  # noqa: E402
-from local_hashed_ledger import LocalHashedLedger  # noqa: E402
-from pipeline_week2 import adapt_to_schema  # noqa: E402
-from secure_gateway import SecureGateway  # noqa: E402
+import server.cloud_server as _cs_mod  # noqa: E402
+import server.main_server as _ms  # noqa: E402
+from core.audit_logger import AuditLogger  # noqa: E402
+from server.cloud_server import ConsentRegistry  # noqa: E402
+from edge.iot_device import IoTDeviceMock  # noqa: E402
+from ledger.local_hashed_ledger import LocalHashedLedger  # noqa: E402
+from edge.pipeline_week2 import adapt_to_schema  # noqa: E402
+from core.secure_gateway import SecureGateway  # noqa: E402
 
 ITERATIONS = 100
 PLAYER_ID = "BENCH-PLAYER-001"

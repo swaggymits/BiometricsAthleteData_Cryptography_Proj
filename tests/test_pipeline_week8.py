@@ -75,22 +75,22 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import serialization
 from fastapi.testclient import TestClient
 
-import cloud_server as cloud_server_module
-import main_server
-from audit_logger import AuditLogger
-from cloud_server import ConsentRegistry
-from config import settings
-from ecdh_key_exchange import (
+import server.cloud_server as cloud_server_module
+import server.main_server as main_server
+from core.audit_logger import AuditLogger
+from server.cloud_server import ConsentRegistry
+from server.config import settings
+from core.ecdh_key_exchange import (
     build_session_info,
     derive_session_key,
     deserialize_public_key,
     generate_ec_keypair,
     serialize_public_key,
 )
-from iot_device import IoTDeviceMock
-from local_hashed_ledger import LocalHashedLedger
-from pipeline_week2 import adapt_to_schema
-from secure_gateway import SecureGateway
+from edge.iot_device import IoTDeviceMock
+from ledger.local_hashed_ledger import LocalHashedLedger
+from edge.pipeline_week2 import adapt_to_schema
+from core.secure_gateway import SecureGateway
 
 # ---------------------------------------------------------------------------
 # Shared test fixtures
@@ -442,10 +442,10 @@ class TestSecureGatewayHybrid(unittest.TestCase):
 class TestAthleteDashboardClubAuth(unittest.TestCase):
     """Unit tests for the club authorization control plane on AthleteDashboard."""
 
-    from athlete_dashboard import AthleteDashboard
+    from evaluation.athlete_dashboard import AthleteDashboard
 
     def _make_dashboard(self):
-        from athlete_dashboard import AthleteDashboard
+        from evaluation.athlete_dashboard import AthleteDashboard
         return AthleteDashboard(PLAYER_ID)
 
     def _make_club_pem(self) -> bytes:

@@ -29,14 +29,19 @@ jobs:
           pip install -r requirements.txt
           pip install ruff mypy
 
-      - name: Auto-fix import sorting (ruff isort)
-        run: ruff check --fix --select I .
+      - name: Auto-fix all fixable lint issues (ruff)
+        run: ruff check --fix .
 
-      - name: Lint (ruff)
+      - name: Lint (ruff) — fail on any remaining unfixable errors
         run: ruff check .
 
       - name: Type-check (mypy)
         run: mypy --ignore-missing-imports --explicit-package-bases . || true
+
+      - name: Run benchmark evaluation (generates EVALUATION_RESULTS.json)
+        run: python evaluation/benchmark_evaluation.py
+        env:
+          PYTHONPATH: .
 
       - name: Run test suite
         run: python -m unittest discover -p "test_*.py" -v

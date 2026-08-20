@@ -16,10 +16,10 @@ import json
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from config import settings
-from iot_device import IoTDeviceMock
-from pipeline_week2 import adapt_to_schema
-from secure_gateway import SecureGateway
+from server.config import settings
+from edge.iot_device import IoTDeviceMock
+from edge.pipeline_week2 import adapt_to_schema
+from core.secure_gateway import SecureGateway
 
 BASE_URL = "http://localhost:8000"
 API_KEY_HEADERS = {"X-API-Key": settings.CLOUD_API_KEY}
