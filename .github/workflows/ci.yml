@@ -38,6 +38,11 @@ jobs:
       - name: Type-check (mypy)
         run: mypy --ignore-missing-imports --explicit-package-bases . || true
 
+      - name: Run benchmark evaluation (generates EVALUATION_RESULTS.json)
+        run: python evaluation/benchmark_evaluation.py
+        env:
+          PYTHONPATH: .
+
       - name: Run test suite
         run: python -m unittest discover -p "test_*.py" -v
 
