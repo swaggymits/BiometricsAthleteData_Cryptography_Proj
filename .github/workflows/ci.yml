@@ -29,10 +29,10 @@ jobs:
           pip install -r requirements.txt
           pip install ruff mypy
 
-      - name: Auto-fix import sorting (ruff isort)
-        run: ruff check --fix --select I .
+      - name: Auto-fix all fixable lint issues (ruff)
+        run: ruff check --fix .
 
-      - name: Lint (ruff)
+      - name: Lint (ruff) — fail on any remaining unfixable errors
         run: ruff check .
 
       - name: Type-check (mypy)

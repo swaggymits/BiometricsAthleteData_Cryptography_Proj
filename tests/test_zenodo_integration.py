@@ -44,40 +44,58 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import sys
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ---------------------------------------------------------------------------
 # Allow running from project root without installing as package
 # ---------------------------------------------------------------------------
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from core.audit_logger import AuditLogger
 from core.biometric_schema import validate_biometric_payload
 from core.secure_gateway import SecureGateway
-from core.audit_logger import AuditLogger
-from dataset.zenodo_dataset_loader import ZenodoDatasetLoader, DATASET_DOI, DATASET_CITATION
+from dataset.zenodo_dataset_loader import DATASET_CITATION, DATASET_DOI, ZenodoDatasetLoader
 
 # ---------------------------------------------------------------------------
 # ANSI colour codes (degrade gracefully on Windows)
 # ---------------------------------------------------------------------------
 _SUPPORTS_COLOUR = sys.stdout.isatty() or os.environ.get("FORCE_COLOR")
 
+
 def _c(text: str, code: str) -> str:
     return f"\033[{code}m{text}\033[0m" if _SUPPORTS_COLOUR else text
 
-GREEN  = lambda t: _c(t, "32")
-RED    = lambda t: _c(t, "31")
-YELLOW = lambda t: _c(t, "33")
-CYAN   = lambda t: _c(t, "36")
-BOLD   = lambda t: _c(t, "1")
-DIM    = lambda t: _c(t, "2")
+
+def GREEN(t):
+    return _c(t, "32")
+
+
+def RED(t):
+    return _c(t, "31")
+
+
+def YELLOW(t):
+    return _c(t, "33")
+
+
+def CYAN(t):
+    return _c(t, "36")
+
+
+def BOLD(t):
+    return _c(t, "1")
+
+
+def DIM(t):
+    return _c(t, "2")
 
 
 # ---------------------------------------------------------------------------
 # GDPR Consent Registry (simple in-memory subset for demo)
 # ---------------------------------------------------------------------------
+
 
 class _ConsentRegistry:
     """Minimal in-memory consent store for the integration test."""
@@ -95,6 +113,7 @@ class _ConsentRegistry:
 # ---------------------------------------------------------------------------
 # Benchmark accumulator
 # ---------------------------------------------------------------------------
+
 
 class _Benchmark:
     def __init__(self) -> None:
@@ -132,6 +151,7 @@ class _Benchmark:
 # ---------------------------------------------------------------------------
 # Core test runner
 # ---------------------------------------------------------------------------
+
 
 def run_integration_test(limit: int = 50, consent_revoke_fraction: float = 0.05) -> int:
     """
@@ -200,10 +220,10 @@ def run_integration_test(limit: int = 50, consent_revoke_fraction: float = 0.05)
     schema_rejected = 0
     unexpected_errors: List[str] = []
 
-    for idx, (payload, meta) in enumerate(all_payloads):
+    for _idx, (payload, meta) in enumerate(all_payloads):
         athlete_id = meta["athlete_id"]
-        device_id  = meta["device_id"]
-        short_id   = athlete_id[:8] + "…"
+        device_id = meta["device_id"]
+        short_id = athlete_id[:8] + "…"
 
         # ── GDPR Consent Gate ─────────────────────────────────────────────
         if not consent.has_consent(athlete_id):
@@ -275,7 +295,7 @@ def run_integration_test(limit: int = 50, consent_revoke_fraction: float = 0.05)
             continue
 
         # ── Benchmark accumulation ────────────────────────────────────────
-        plaintext_b  = len(json.dumps(payload).encode("utf-8"))
+        plaintext_b = len(json.dumps(payload).encode("utf-8"))
         ciphertext_b = len(bytes.fromhex(encrypted_packet["ciphertext"]))
         bench.record(encrypt_ms, plaintext_b, ciphertext_b)
 
@@ -320,7 +340,7 @@ def run_integration_test(limit: int = 50, consent_revoke_fraction: float = 0.05)
         print(f"  Avg encrypt latency     : {bench.avg_latency_ms:.3f} ms/record")
         print(f"  Throughput (est.)       : {bench.throughput_rps:,.0f} records/sec")
         print(f"  Avg ciphertext overhead : +{bench.avg_expansion_pct:.1f}% over plaintext")
-        print(f"  (AES-GCM adds 12-byte nonce + 16-byte auth tag per record)")
+        print("  (AES-GCM adds 12-byte nonce + 16-byte auth tag per record)")
 
     print()
     print(BOLD("  DATASET CITATION"))
@@ -344,6 +364,7 @@ def run_integration_test(limit: int = 50, consent_revoke_fraction: float = 0.05)
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(

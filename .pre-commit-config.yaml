@@ -1,0 +1,10 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.7        # keep in sync with your ruff version
+    hooks:
+      # 1. Auto-fix all fixable issues (imports, f-strings, etc.)
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+
+      # 2. Format (optional but recommended — keeps code style consistent)
+      - id: ruff-format

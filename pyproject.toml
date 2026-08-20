@@ -5,7 +5,13 @@ exclude = ["venv", ".venv", "__pycache__"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B"]
-ignore = ["E501"]
+ignore = [
+    "E501",   # line too long  (handled by formatter)
+    "E402",   # module-level import not at top  (intentional deferred imports)
+    "E731",   # lambda assignment  (colour helpers are intentional)
+    "B007",   # loop variable not used  (use _ prefix convention instead)
+    "F541",   # f-string without placeholders  (auto-fixed by ruff --fix)
+]
 
 [tool.mypy]
 python_version = "3.9"

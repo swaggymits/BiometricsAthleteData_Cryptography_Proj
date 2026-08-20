@@ -31,7 +31,6 @@ jitter around the Kona Ironman World Championship reference point
 from __future__ import annotations
 
 import io
-import math
 import random
 from typing import Any, Dict, Generator, List, Optional, Tuple
 
@@ -71,6 +70,7 @@ _INJURY_RISK_MAX: float = 0.99
 # Helper: VO₂max → estimated blood glucose (mg/dL)
 # ---------------------------------------------------------------------------
 
+
 def _estimate_glucose_from_vo2max(vo2max: float, resting_hr: float) -> float:
     """
     Estimate resting blood glucose (mg/dL) from aerobic capacity proxies.
@@ -97,7 +97,10 @@ def _estimate_glucose_from_vo2max(vo2max: float, resting_hr: float) -> float:
 # Helper: HRV baseline → fatigue index (%)
 # ---------------------------------------------------------------------------
 
-def _estimate_fatigue_from_hrv(hrv_baseline: float, hrv_range: Optional[Tuple[float, float]]) -> float:
+
+def _estimate_fatigue_from_hrv(
+    hrv_baseline: float, hrv_range: Optional[Tuple[float, float]]
+) -> float:
     """
     Derive a fatigue index percentage from heart-rate variability (HRV).
 
@@ -131,6 +134,7 @@ def _estimate_fatigue_from_hrv(hrv_baseline: float, hrv_range: Optional[Tuple[fl
 # Helper: GPS jitter around anchor
 # ---------------------------------------------------------------------------
 
+
 def _generate_gps_telemetry(speed_kmh_hint: Optional[float] = None) -> Dict[str, float]:
     """
     Synthesise a GPS telemetry reading around the Kona Ironman reference.
@@ -151,6 +155,7 @@ def _generate_gps_telemetry(speed_kmh_hint: Optional[float] = None) -> Dict[str,
 # ---------------------------------------------------------------------------
 # Main Loader Class
 # ---------------------------------------------------------------------------
+
 
 class ZenodoDatasetLoader:
     """
@@ -298,6 +303,7 @@ class ZenodoDatasetLoader:
         Returns:
             (payload_dict, meta_dict)
         """
+
         def safe_float(val: Any, default: float = 0.0) -> float:
             try:
                 return float(str(val).replace(",", "."))
@@ -324,6 +330,7 @@ class ZenodoDatasetLoader:
         hrv_range_parsed: Optional[Tuple[float, float]] = None
         if hrv_range_str:
             import re
+
             nums = re.findall(r"[-+]?\d*\.?\d+", hrv_range_str)
             if len(nums) >= 2:
                 hrv_range_parsed = (float(nums[0]), float(nums[1]))

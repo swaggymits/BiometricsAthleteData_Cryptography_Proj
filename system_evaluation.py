@@ -47,49 +47,70 @@ from typing import Any, Dict, List, Tuple
 # ---------------------------------------------------------------------------
 # Isolated test-environment file paths (never pollute the real DB)
 # ---------------------------------------------------------------------------
-_EVAL_DB      = "eval_mock_db.json"
-_EVAL_AUDIT   = "eval_audit_log.csv"
-_EVAL_LEDGER  = "eval_ledger.json"
+_EVAL_DB = "eval_mock_db.json"
+_EVAL_AUDIT = "eval_audit_log.csv"
+_EVAL_LEDGER = "eval_ledger.json"
 
-os.environ.setdefault("MOCK_DB_PATH",      _EVAL_DB)
-os.environ.setdefault("AUDIT_LOG_PATH",    _EVAL_AUDIT)
-os.environ.setdefault("LEDGER_FILE_PATH",  _EVAL_LEDGER)
+os.environ.setdefault("MOCK_DB_PATH", _EVAL_DB)
+os.environ.setdefault("AUDIT_LOG_PATH", _EVAL_AUDIT)
+os.environ.setdefault("LEDGER_FILE_PATH", _EVAL_LEDGER)
 
 # ---------------------------------------------------------------------------
 # Import application modules (config must be cache-cleared BEFORE first use)
 # ---------------------------------------------------------------------------
-import server.config as _cfg
+import server.config as _cfg  # noqa: E402
+
 _cfg.get_settings.cache_clear()
 
-import server.cloud_server  as _cs_mod
-import server.main_server   as _ms
-from core.audit_logger             import AuditLogger
-from core.secure_gateway           import SecureGateway
-from dataset.zenodo_dataset_loader import ZenodoDatasetLoader
-from edge.iot_device               import IoTDeviceMock
-from edge.pipeline_week2           import adapt_to_schema
-from fastapi.testclient            import TestClient
-from ledger.local_hashed_ledger    import LocalHashedLedger
-from server.cloud_server           import ConsentRegistry
+from fastapi.testclient import TestClient  # noqa: E402
+
+import server.cloud_server as _cs_mod  # noqa: E402
+import server.main_server as _ms  # noqa: E402
+from core.audit_logger import AuditLogger  # noqa: E402
+from core.secure_gateway import SecureGateway  # noqa: E402
+from dataset.zenodo_dataset_loader import ZenodoDatasetLoader  # noqa: E402
+from edge.iot_device import IoTDeviceMock  # noqa: E402
+from edge.pipeline_week2 import adapt_to_schema  # noqa: E402
+from ledger.local_hashed_ledger import LocalHashedLedger  # noqa: E402
+from server.cloud_server import ConsentRegistry  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Benchmark parameters
 # ---------------------------------------------------------------------------
-N_LATENCY_ITERATIONS            = 50    # repetitions for E2E latency stats
-N_THROUGHPUT_BATCHES_PER_DEVICE = 5     # packets each virtual IoT device sends
-CONCURRENCY_LEVELS              = [10, 50, 100]
-GATEWAY_ID                      = "EVAL-GW-001"
-DEVICE_ID_PREFIX                = "EVAL-IOT"
-ZENODO_SAMPLE_LIMIT             = 200   # cap so download stays fast
+N_LATENCY_ITERATIONS = 50  # repetitions for E2E latency stats
+N_THROUGHPUT_BATCHES_PER_DEVICE = 5  # packets each virtual IoT device sends
+CONCURRENCY_LEVELS = [10, 50, 100]
+GATEWAY_ID = "EVAL-GW-001"
+DEVICE_ID_PREFIX = "EVAL-IOT"
+ZENODO_SAMPLE_LIMIT = 200  # cap so download stays fast
 
 # ANSI colours (auto-disabled for non-TTY)
 _TTY = sys.stdout.isatty() or bool(os.environ.get("FORCE_COLOR"))
-def _c(t: str, code: str) -> str: return f"\033[{code}m{t}\033[0m" if _TTY else t
-G  = lambda t: _c(str(t), "32")
-R  = lambda t: _c(str(t), "31")
-Y  = lambda t: _c(str(t), "33")
-C  = lambda t: _c(str(t), "36")
-B  = lambda t: _c(str(t), "1")
+
+
+def _c(t: str, code: str) -> str:
+    return f"\033[{code}m{t}\033[0m" if _TTY else t
+
+
+def G(t):
+    return _c(str(t), "32")
+
+
+def R(t):
+    return _c(str(t), "31")
+
+
+def Y(t):
+    return _c(str(t), "33")
+
+
+def C(t):
+    return _c(str(t), "36")
+
+
+def B(t):
+    return _c(str(t), "1")
+
 
 DIV = "─" * 66
 
@@ -98,12 +119,13 @@ DIV = "─" * 66
 # Internal helpers
 # ===========================================================================
 
+
 def _build_client() -> TestClient:
     """Rebuild all in-process singletons with isolated evaluation files."""
-    _ms.cloud_server     = _cs_mod.CloudServer(db_path=_EVAL_DB)
+    _ms.cloud_server = _cs_mod.CloudServer(db_path=_EVAL_DB)
     _ms.consent_registry = ConsentRegistry()
-    _ms.audit_logger     = AuditLogger(log_file_path=_EVAL_AUDIT)
-    _ms.ledger           = LocalHashedLedger(ledger_file_json=_EVAL_LEDGER)
+    _ms.audit_logger = AuditLogger(log_file_path=_EVAL_AUDIT)
+    _ms.ledger = LocalHashedLedger(ledger_file_json=_EVAL_LEDGER)
     return TestClient(_ms.app, raise_server_exceptions=False)
 
 
@@ -127,10 +149,10 @@ def _build_encrypted_packet(
     enc = gateway.encrypt_data(payload, device_id=device_id, player_id=player_id)
     body = {
         "gateway_id": enc["gateway_id"],
-        "device_id":  enc.get("device_id"),
-        "player_id":  enc.get("player_id"),
-        "sent_at":    enc.get("sent_at"),
-        "nonce":      enc["nonce"],
+        "device_id": enc.get("device_id"),
+        "player_id": enc.get("player_id"),
+        "sent_at": enc.get("sent_at"),
+        "nonce": enc["nonce"],
         "ciphertext": enc["ciphertext"],
     }
     return body, enc
@@ -148,18 +170,19 @@ def _pstats(vals: List[float]) -> Dict[str, float]:
     s = sorted(vals)
     n = len(s)
     return {
-        "mean_ms":   round(statistics.mean(s), 3),
+        "mean_ms": round(statistics.mean(s), 3),
         "median_ms": round(statistics.median(s), 3),
-        "p95_ms":    round(s[int(n * 0.95)], 3) if n >= 2 else round(s[-1], 3),
-        "p99_ms":    round(s[max(int(n * 0.99), n - 1)], 3),
-        "min_ms":    round(s[0], 3),
-        "max_ms":    round(s[-1], 3),
+        "p95_ms": round(s[int(n * 0.95)], 3) if n >= 2 else round(s[-1], 3),
+        "p99_ms": round(s[max(int(n * 0.99), n - 1)], 3),
+        "min_ms": round(s[0], 3),
+        "max_ms": round(s[-1], 3),
     }
 
 
 # ===========================================================================
 # BENCHMARK 1 — End-to-End Latency
 # ===========================================================================
+
 
 def bench_e2e_latency(
     client: TestClient,
@@ -170,10 +193,10 @@ def bench_e2e_latency(
     print(f"  {DIV}")
 
     gateway = SecureGateway(gateway_id=GATEWAY_ID, aes_key=aes_key)
-    latencies: List[float]    = []
-    enc_times: List[float]    = []
+    latencies: List[float] = []
+    enc_times: List[float] = []
     ingest_times: List[float] = []
-    dec_times: List[float]    = []
+    dec_times: List[float] = []
 
     n = min(N_LATENCY_ITERATIONS, len(zenodo_payloads))
     print(f"  Running {n} E2E iterations on Zenodo athlete payloads …")
@@ -199,7 +222,8 @@ def bench_e2e_latency(
         _ms._rate_limit_store.clear()
         t0 = time.perf_counter()
         r_ingest = client.post(
-            "/api/v1/telemetry/ingest", json=body,
+            "/api/v1/telemetry/ingest",
+            json=body,
             headers={"X-API-Key": _api_key()},
         )
         ing_ms = (time.perf_counter() - t0) * 1000
@@ -234,17 +258,17 @@ def bench_e2e_latency(
         raise RuntimeError("All E2E latency iterations failed — check server configuration.")
 
     result = {
-        "n_iterations":  len(latencies),
-        "e2e_total":     _pstats(latencies),
+        "n_iterations": len(latencies),
+        "e2e_total": _pstats(latencies),
         "phase_encrypt": _pstats(enc_times),
-        "phase_ingest":  _pstats(ingest_times),
+        "phase_ingest": _pstats(ingest_times),
         "phase_decrypt": _pstats(dec_times),
     }
 
     st = result["e2e_total"]
     mean_str = f"{st['mean_ms']:.3f} ms"
-    p95_str  = f"{st['p95_ms']:.3f} ms"
-    p99_str  = f"{st['p99_ms']:.3f} ms"
+    p95_str = f"{st['p95_ms']:.3f} ms"
+    p99_str = f"{st['p99_ms']:.3f} ms"
     enc_mean = f"{statistics.mean(enc_times):.3f}"
     ing_mean = f"{statistics.mean(ingest_times):.3f}"
     dec_mean = f"{statistics.mean(dec_times):.3f}"
@@ -261,6 +285,7 @@ def bench_e2e_latency(
 # BENCHMARK 2 — Scalability & Throughput
 # ===========================================================================
 
+
 def _device_worker(
     device_index: int,
     aes_key: bytes,
@@ -270,7 +295,7 @@ def _device_worker(
     errors: List[int],
     lock: threading.Lock,
 ) -> None:
-    gateway   = SecureGateway(gateway_id=f"{GATEWAY_ID}-{device_index}", aes_key=aes_key)
+    gateway = SecureGateway(gateway_id=f"{GATEWAY_ID}-{device_index}", aes_key=aes_key)
     player_id = f"THRU-P{device_index:04d}"
     device_id = f"{DEVICE_ID_PREFIX}-{device_index:04d}"
     n_payloads = len(zenodo_payloads)
@@ -279,13 +304,16 @@ def _device_worker(
     local_errors = 0
 
     for batch_i in range(N_THROUGHPUT_BATCHES_PER_DEVICE):
-        payload, _ = zenodo_payloads[(device_index * N_THROUGHPUT_BATCHES_PER_DEVICE + batch_i) % n_payloads]
+        payload, _ = zenodo_payloads[
+            (device_index * N_THROUGHPUT_BATCHES_PER_DEVICE + batch_i) % n_payloads
+        ]
         body, _ = _build_encrypted_packet(gateway, payload, player_id, device_id)
         with lock:
             _ms._rate_limit_store.clear()
         t0 = time.perf_counter()
         r = client.post(
-            "/api/v1/telemetry/ingest", json=body,
+            "/api/v1/telemetry/ingest",
+            json=body,
             headers={"X-API-Key": _api_key()},
         )
         elapsed_ms = (time.perf_counter() - t0) * 1000
@@ -314,7 +342,7 @@ def bench_scalability_throughput(
     for level in CONCURRENCY_LEVELS:
         print(f"\n  → Testing {level} concurrent IoT devices …")
         results: List[float] = []
-        errors:  List[int]   = []
+        errors: List[int] = []
         lock = threading.Lock()
 
         total_expected = level * N_THROUGHPUT_BATCHES_PER_DEVICE
@@ -324,8 +352,13 @@ def bench_scalability_throughput(
             futures = [
                 pool.submit(
                     _device_worker,
-                    idx, aes_key, zenodo_payloads,
-                    client, results, errors, lock,
+                    idx,
+                    aes_key,
+                    zenodo_payloads,
+                    client,
+                    results,
+                    errors,
+                    lock,
                 )
                 for idx in range(level)
             ]
@@ -336,25 +369,27 @@ def bench_scalability_throughput(
 
         wall_elapsed = time.perf_counter() - wall_start
         total_success = len(results)
-        total_errors  = sum(errors)
+        total_errors = sum(errors)
         rps = round(total_success / wall_elapsed, 2) if wall_elapsed > 0 else 0.0
         avg_lat = round(statistics.mean(results), 2) if results else 0.0
         p95_lat = round(sorted(results)[int(len(results) * 0.95)], 2) if results else 0.0
 
         throughput_results[str(level)] = {
-            "concurrent_devices":  level,
-            "total_requests":      total_expected,
+            "concurrent_devices": level,
+            "total_requests": total_expected,
             "successful_requests": total_success,
-            "failed_requests":     total_errors,
-            "wall_time_s":         round(wall_elapsed, 3),
-            "req_per_sec":         rps,
-            "avg_ingest_ms":       avg_lat,
-            "p95_ingest_ms":       p95_lat,
+            "failed_requests": total_errors,
+            "wall_time_s": round(wall_elapsed, 3),
+            "req_per_sec": rps,
+            "avg_ingest_ms": avg_lat,
+            "p95_ingest_ms": p95_lat,
         }
 
-        print(f"    {G('✔')} Devices={level}  RPS={G(str(rps))}  "
-              f"Success={total_success}/{total_expected}  "
-              f"Avg={avg_lat:.2f} ms  p95={p95_lat:.2f} ms")
+        print(
+            f"    {G('✔')} Devices={level}  RPS={G(str(rps))}  "
+            f"Success={total_success}/{total_expected}  "
+            f"Avg={avg_lat:.2f} ms  p95={p95_lat:.2f} ms"
+        )
 
     return throughput_results
 
@@ -362,6 +397,7 @@ def bench_scalability_throughput(
 # ===========================================================================
 # BENCHMARK 3 — GDPR Consent Revoke Edge-Case
 # ===========================================================================
+
 
 def bench_gdpr_revoke_edge_case(
     client: TestClient,
@@ -372,7 +408,7 @@ def bench_gdpr_revoke_edge_case(
     print(f"  {DIV}")
 
     ATHLETE_ID = "GDPR-EDGE-ATHLETE-001"
-    DEVICE_ID  = "GDPR-EDGE-IOT-001"
+    DEVICE_ID = "GDPR-EDGE-IOT-001"
     BATCH_SIZE = 20
 
     gateway = SecureGateway(gateway_id=GATEWAY_ID, aes_key=aes_key)
@@ -394,16 +430,17 @@ def bench_gdpr_revoke_edge_case(
         body, _ = _build_encrypted_packet(gateway, payload, ATHLETE_ID, DEVICE_ID)
         packets.append(body)
 
-    pre_revoke_codes:  List[int] = []
+    pre_revoke_codes: List[int] = []
     post_revoke_codes: List[int] = []
     revoke_fired = threading.Event()
-    ingest_done  = threading.Event()
+    ingest_done = threading.Event()
 
     def _ingest_worker():
         for pkt in packets:
             _ms._rate_limit_store.clear()
             r = client.post(
-                "/api/v1/telemetry/ingest", json=pkt,
+                "/api/v1/telemetry/ingest",
+                json=pkt,
                 headers={"X-API-Key": _api_key()},
             )
             if not revoke_fired.is_set():
@@ -434,12 +471,12 @@ def bench_gdpr_revoke_edge_case(
     ingest_thread.join(timeout=5)
 
     # Attempt to authorize-decrypt AFTER revoke
-    all_stored      = _ms.cloud_server.get_all_stored_records()
+    all_stored = _ms.cloud_server.get_all_stored_records()
     athlete_records = [rec for rec in all_stored if rec.get("player_id") == ATHLETE_ID]
 
-    ATTEMPT_COUNT   = min(10, len(athlete_records))
-    decrypt_403s    = 0
-    decrypt_200s    = 0
+    ATTEMPT_COUNT = min(10, len(athlete_records))
+    decrypt_403s = 0
+    decrypt_200s = 0
 
     print(f"  Attempting {ATTEMPT_COUNT} authorize-decrypt calls for revoked athlete …")
     for rec in athlete_records[:ATTEMPT_COUNT]:
@@ -458,18 +495,18 @@ def bench_gdpr_revoke_edge_case(
     detail = (
         f"All {decrypt_403s}/{ATTEMPT_COUNT} post-revoke decrypt attempts returned "
         f"HTTP 403 — GDPR gate is immediate and race-condition-safe."
-        if all_blocked else
-        f"FAILED: {decrypt_200s} decrypt(s) succeeded AFTER revoke — GDPR gate has a race condition!"
+        if all_blocked
+        else f"FAILED: {decrypt_200s} decrypt(s) succeeded AFTER revoke — GDPR gate has a race condition!"
     )
 
     result = {
-        "pre_revoke_ingestions":          len(pre_revoke_codes),
-        "post_revoke_ingestions":         len(post_revoke_codes),
-        "decrypt_attempts_post_revoke":   ATTEMPT_COUNT,
-        "decrypt_403_count":              decrypt_403s,
-        "decrypt_200_count":              decrypt_200s,
-        "assertion_passed":               all_blocked,
-        "assertion_detail":               detail,
+        "pre_revoke_ingestions": len(pre_revoke_codes),
+        "post_revoke_ingestions": len(post_revoke_codes),
+        "decrypt_attempts_post_revoke": ATTEMPT_COUNT,
+        "decrypt_403_count": decrypt_403s,
+        "decrypt_200_count": decrypt_200s,
+        "assertion_passed": all_blocked,
+        "assertion_detail": detail,
     }
 
     verdict = G("✔ PASS") if all_blocked else R("✗ FAIL")
@@ -484,12 +521,13 @@ def bench_gdpr_revoke_edge_case(
 # Markdown table output
 # ===========================================================================
 
+
 def render_markdown_table(
     latency: Dict[str, Any],
     throughput: Dict[str, Any],
     revoke: Dict[str, Any],
 ) -> str:
-    e  = latency["e2e_total"]
+    e = latency["e2e_total"]
     pe = latency["phase_encrypt"]
     pi = latency["phase_ingest"]
     pd = latency["phase_decrypt"]
@@ -503,8 +541,10 @@ def render_markdown_table(
     a("> **Dataset**: Zenodo Synthetic Triathlete Dataset for Injury Prediction Research (2024)  ")
     a("> Rossi, L. (2025). https://doi.org/10.5281/zenodo.15401061  ")
     a(f"> **Evaluation date**: {time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}  ")
-    a(f"> **Iterations (latency)**: {latency['n_iterations']}  |  "
-      f"**Packets per device (throughput)**: {N_THROUGHPUT_BATCHES_PER_DEVICE}")
+    a(
+        f"> **Iterations (latency)**: {latency['n_iterations']}  |  "
+        f"**Packets per device (throughput)**: {N_THROUGHPUT_BATCHES_PER_DEVICE}"
+    )
     a("")
 
     # ── Table 1: E2E Latency ─────────────────────────────────────────────
@@ -514,14 +554,24 @@ def render_markdown_table(
     a("")
     a("| Pipeline Phase | Mean (ms) | Median (ms) | p95 (ms) | p99 (ms) |")
     a("|:---|---:|---:|---:|---:|")
-    a(f"| Gateway AES-256-GCM Encryption | {pe['mean_ms']:.3f} | {pe['median_ms']:.3f} | {pe['p95_ms']:.3f} | {pe['p99_ms']:.3f} |")
-    a(f"| Server Ingestion (`POST /api/v1/telemetry/ingest`) | {pi['mean_ms']:.3f} | {pi['median_ms']:.3f} | {pi['p95_ms']:.3f} | {pi['p99_ms']:.3f} |")
-    a(f"| Authorized Decryption (`POST /api/v1/telemetry/authorize-decrypt`) | {pd['mean_ms']:.3f} | {pd['median_ms']:.3f} | {pd['p95_ms']:.3f} | {pd['p99_ms']:.3f} |")
-    a(f"| **End-to-End Total** | **{e['mean_ms']:.3f}** | **{e['median_ms']:.3f}** | **{e['p95_ms']:.3f}** | **{e['p99_ms']:.3f}** |")
+    a(
+        f"| Gateway AES-256-GCM Encryption | {pe['mean_ms']:.3f} | {pe['median_ms']:.3f} | {pe['p95_ms']:.3f} | {pe['p99_ms']:.3f} |"
+    )
+    a(
+        f"| Server Ingestion (`POST /api/v1/telemetry/ingest`) | {pi['mean_ms']:.3f} | {pi['median_ms']:.3f} | {pi['p95_ms']:.3f} | {pi['p99_ms']:.3f} |"
+    )
+    a(
+        f"| Authorized Decryption (`POST /api/v1/telemetry/authorize-decrypt`) | {pd['mean_ms']:.3f} | {pd['median_ms']:.3f} | {pd['p95_ms']:.3f} | {pd['p99_ms']:.3f} |"
+    )
+    a(
+        f"| **End-to-End Total** | **{e['mean_ms']:.3f}** | **{e['median_ms']:.3f}** | **{e['p95_ms']:.3f}** | **{e['p99_ms']:.3f}** |"
+    )
     a("")
-    a(f"*N = {latency['n_iterations']} iterations using real Zenodo athlete payloads "
-      f"(heart rate, fatigue index, VO₂max-derived glucose, GPS, injury risk). "
-      f"All three security gates active (API-Key + GDPR consent + RBAC).*")
+    a(
+        f"*N = {latency['n_iterations']} iterations using real Zenodo athlete payloads "
+        f"(heart rate, fatigue index, VO₂max-derived glucose, GPS, injury risk). "
+        f"All three security gates active (API-Key + GDPR consent + RBAC).*"
+    )
     a("")
 
     # ── Table 2: Scalability ─────────────────────────────────────────────
@@ -529,23 +579,31 @@ def render_markdown_table(
     a("")
     a("### Table 2 — Scalability & Throughput (Concurrent IoT Device Simulation)")
     a("")
-    a("| Concurrent Devices | Total Requests | Successful | Failed | Wall Time (s) | **RPS** | Avg Ingest (ms) | p95 Ingest (ms) |")
-    a("|-------------------:|---------------:|-----------:|-------:|--------------:|--------:|----------------:|----------------:|")
+    a(
+        "| Concurrent Devices | Total Requests | Successful | Failed | Wall Time (s) | **RPS** | Avg Ingest (ms) | p95 Ingest (ms) |"
+    )
+    a(
+        "|-------------------:|---------------:|-----------:|-------:|--------------:|--------:|----------------:|----------------:|"
+    )
     for lvl in CONCURRENCY_LEVELS:
         t = throughput[str(lvl)]
-        a(f"| {t['concurrent_devices']} "
-          f"| {t['total_requests']} "
-          f"| {t['successful_requests']} "
-          f"| {t['failed_requests']} "
-          f"| {t['wall_time_s']:.3f} "
-          f"| **{t['req_per_sec']:.2f}** "
-          f"| {t['avg_ingest_ms']:.2f} "
-          f"| {t['p95_ingest_ms']:.2f} |")
+        a(
+            f"| {t['concurrent_devices']} "
+            f"| {t['total_requests']} "
+            f"| {t['successful_requests']} "
+            f"| {t['failed_requests']} "
+            f"| {t['wall_time_s']:.3f} "
+            f"| **{t['req_per_sec']:.2f}** "
+            f"| {t['avg_ingest_ms']:.2f} "
+            f"| {t['p95_ingest_ms']:.2f} |"
+        )
     a("")
-    a(f"*Each virtual IoT device sends {N_THROUGHPUT_BATCHES_PER_DEVICE} AES-256-GCM-encrypted packets "
-      f"derived from Zenodo athlete payloads. Rate-limiter bypassed per-request to measure "
-      f"raw cryptographic + I/O throughput (the rate-limiter is a configurable security "
-      f"control, not a pipeline bottleneck).*")
+    a(
+        f"*Each virtual IoT device sends {N_THROUGHPUT_BATCHES_PER_DEVICE} AES-256-GCM-encrypted packets "
+        f"derived from Zenodo athlete payloads. Rate-limiter bypassed per-request to measure "
+        f"raw cryptographic + I/O throughput (the rate-limiter is a configurable security "
+        f"control, not a pipeline bottleneck).*"
+    )
     a("")
 
     # ── Table 3: GDPR Edge Case ──────────────────────────────────────────
@@ -556,7 +614,7 @@ def render_markdown_table(
     verdict_md = "✅ **PASS**" if revoke["assertion_passed"] else "❌ **FAIL**"
     a("| Parameter | Value |")
     a("|:----------|:------|")
-    a(f"| Scenario | Mid-batch GDPR revoke while concurrent batch ingestion is in progress |")
+    a("| Scenario | Mid-batch GDPR revoke while concurrent batch ingestion is in progress |")
     a(f"| Pre-revoke ingestions completed | {revoke['pre_revoke_ingestions']} |")
     a(f"| Post-revoke ingestions completed | {revoke['post_revoke_ingestions']} |")
     a(f"| Authorize-decrypt attempts after revoke | {revoke['decrypt_attempts_post_revoke']} |")
@@ -564,12 +622,14 @@ def render_markdown_table(
     a(f"| HTTP 200 OK responses (must be 0) | **{revoke['decrypt_200_count']}** |")
     a(f"| Assertion result | {verdict_md} |")
     a("")
-    a("> **GDPR Art. 7(3) compliance**: The `ConsentRegistry.set_consent()` call is "
-      "protected by a `threading.Lock`, making the consent state change atomic. Any "
-      "`authorize-decrypt` request arriving after the revoke—regardless of whether "
-      "the corresponding ingest started before or after the revoke event—is "
-      "immediately rejected with HTTP 403 Forbidden. No AES key material is accessed "
-      "and no plaintext is ever reconstructed for a revoked athlete.")
+    a(
+        "> **GDPR Art. 7(3) compliance**: The `ConsentRegistry.set_consent()` call is "
+        "protected by a `threading.Lock`, making the consent state change atomic. Any "
+        "`authorize-decrypt` request arriving after the revoke—regardless of whether "
+        "the corresponding ingest started before or after the revoke event—is "
+        "immediately rejected with HTTP 403 Forbidden. No AES key material is accessed "
+        "and no plaintext is ever reconstructed for a revoked athlete."
+    )
     a("")
 
     return "\n".join(lines)
@@ -578,6 +638,7 @@ def render_markdown_table(
 # ===========================================================================
 # MAIN
 # ===========================================================================
+
 
 def main() -> None:
     print()
@@ -598,20 +659,27 @@ def main() -> None:
         print(Y("  Using IoTDeviceMock synthetic data as fallback.\n"))
         _mock = IoTDeviceMock(device_id="MOCK-FALLBACK-001", player_id="MOCK-P-001")
         zenodo_payloads = []
-        needed = max(ZENODO_SAMPLE_LIMIT, N_LATENCY_ITERATIONS,
-                     max(CONCURRENCY_LEVELS) * N_THROUGHPUT_BATCHES_PER_DEVICE + 20)
+        needed = max(
+            ZENODO_SAMPLE_LIMIT,
+            N_LATENCY_ITERATIONS,
+            max(CONCURRENCY_LEVELS) * N_THROUGHPUT_BATCHES_PER_DEVICE + 20,
+        )
         for i in range(needed):
             raw = _mock.generate_biometrics()
             adapted = adapt_to_schema(raw)
-            zenodo_payloads.append((adapted, {
-                "athlete_id": f"MOCK{i:04d}",
-                "device_id":  f"IOT-MOCK-{i:04d}",
-                "zenodo_record": "fallback",
-            }))
+            zenodo_payloads.append(
+                (
+                    adapted,
+                    {
+                        "athlete_id": f"MOCK{i:04d}",
+                        "device_id": f"IOT-MOCK-{i:04d}",
+                        "zenodo_record": "fallback",
+                    },
+                )
+            )
 
     # Pad payloads list if the dataset is smaller than what we need
-    need = max(N_LATENCY_ITERATIONS,
-               max(CONCURRENCY_LEVELS) * N_THROUGHPUT_BATCHES_PER_DEVICE + 20)
+    need = max(N_LATENCY_ITERATIONS, max(CONCURRENCY_LEVELS) * N_THROUGHPUT_BATCHES_PER_DEVICE + 20)
     while len(zenodo_payloads) < need:
         zenodo_payloads.extend(zenodo_payloads)
 
@@ -621,15 +689,15 @@ def main() -> None:
 
     # --- Run benchmarks ────────────────────────────────────────────────────
     try:
-        client           = _build_client()
-        latency_results  = bench_e2e_latency(client, aes_key, zenodo_payloads)
+        client = _build_client()
+        latency_results = bench_e2e_latency(client, aes_key, zenodo_payloads)
 
         _cleanup()
-        client              = _build_client()
-        throughput_results  = bench_scalability_throughput(client, aes_key, zenodo_payloads)
+        client = _build_client()
+        throughput_results = bench_scalability_throughput(client, aes_key, zenodo_payloads)
 
         _cleanup()
-        client         = _build_client()
+        client = _build_client()
         revoke_results = bench_gdpr_revoke_edge_case(client, aes_key, zenodo_payloads)
 
     finally:
@@ -644,9 +712,9 @@ def main() -> None:
 
     # --- JSON results ────────────────────────────────────────────────────────
     out = {
-        "benchmark_1_e2e_latency":             latency_results,
-        "benchmark_2_scalability_throughput":  throughput_results,
-        "benchmark_3_gdpr_revoke_edge_case":   revoke_results,
+        "benchmark_1_e2e_latency": latency_results,
+        "benchmark_2_scalability_throughput": throughput_results,
+        "benchmark_3_gdpr_revoke_edge_case": revoke_results,
     }
     results_path = "SYSTEM_EVALUATION_RESULTS.json"
     with open(results_path, "w", encoding="utf-8") as fh:

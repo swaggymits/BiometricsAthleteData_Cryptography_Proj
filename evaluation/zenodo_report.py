@@ -17,19 +17,41 @@ from datetime import datetime
 
 # ── colour helpers ─────────────────────────────────────────────────────────
 _TTY = sys.stdout.isatty() or os.environ.get("FORCE_COLOR")
-def _c(t, code): return f"\033[{code}m{t}\033[0m" if _TTY else t
-G  = lambda t: _c(t, "32")
-R  = lambda t: _c(t, "31")
-Y  = lambda t: _c(t, "33")
-C  = lambda t: _c(t, "36")
-B  = lambda t: _c(t, "1")
-DM = lambda t: _c(t, "2")
+
+
+def _c(t, code):
+    return f"\033[{code}m{t}\033[0m" if _TTY else t
+
+
+def G(t):
+    return _c(t, "32")
+
+
+def R(t):
+    return _c(t, "31")
+
+
+def Y(t):
+    return _c(t, "33")
+
+
+def C(t):
+    return _c(t, "36")
+
+
+def B(t):
+    return _c(t, "1")
+
+
+def DM(t):
+    return _c(t, "2")
+
 
 DIVIDER = "─" * 62
 
 # ── locate audit_log.csv inside evaluation/ ────────────────────────────────
-_HERE    = os.path.dirname(os.path.abspath(__file__))          # evaluation/
-_ROOT    = os.path.dirname(_HERE)                               # project root
+_HERE = os.path.dirname(os.path.abspath(__file__))  # evaluation/
+_ROOT = os.path.dirname(_HERE)  # project root
 LOG_PATH = os.path.join(_HERE, "audit_log.csv")
 
 
@@ -49,11 +71,11 @@ def load_zenodo_entries():
 def main():
     entries = load_zenodo_entries()
 
-    total       = len(entries)
-    passed      = sum(1 for e in entries if e["status"] == "SUCCESS")
-    gdpr_block  = sum(1 for e in entries if e["status"] == "DENIED_GDPR_403")
+    total = len(entries)
+    passed = sum(1 for e in entries if e["status"] == "SUCCESS")
+    gdpr_block = sum(1 for e in entries if e["status"] == "DENIED_GDPR_403")
     schema_fail = sum(1 for e in entries if e["status"] == "SCHEMA_REJECTED")
-    other_fail  = total - passed - gdpr_block - schema_fail
+    other_fail = total - passed - gdpr_block - schema_fail
 
     ts_list = []
     for e in entries:
@@ -63,13 +85,12 @@ def main():
             pass
     run_time = "2026-08-14 07:15:38 UTC"
     batch_duration_ms = (
-        (max(ts_list) - min(ts_list)).total_seconds() * 1000
-        if len(ts_list) > 1 else None
+        (max(ts_list) - min(ts_list)).total_seconds() * 1000 if len(ts_list) > 1 else None
     )
 
     # Hard-coded benchmark numbers from the live test run
-    avg_latency_ms      = 0.015
-    throughput_rps      = 65_055
+    avg_latency_ms = 0.015
+    throughput_rps = 65_055
     ciphertext_overhead = 9.8
 
     print()
@@ -82,13 +103,13 @@ def main():
     # ── SECTION 1: Dataset ─────────────────────────────────────────────────
     print(B(C("  ▶ DATASET USED")))
     print(f"  {DIVIDER}")
-    print(f"  Name      : Synthetic Triathlete Dataset for Injury")
-    print(f"              Prediction Research (2024)")
+    print("  Name      : Synthetic Triathlete Dataset for Injury")
+    print("              Prediction Research (2024)")
     print(f"  Source    : {C('https://zenodo.org/records/15401061')}")
     print(f"  DOI       : {C('10.5281/zenodo.15401061')}")
-    print(f"  License   : CC-BY 4.0  (fully open access, citable)")
-    print(f"  Author    : Rossi, Leonardo — University of St.Gallen")
-    print(f"  File used : athletes.csv  (454 KB, 1,000 athletes)")
+    print("  License   : CC-BY 4.0  (fully open access, citable)")
+    print("  Author    : Rossi, Leonardo — University of St.Gallen")
+    print("  File used : athletes.csv  (454 KB, 1,000 athletes)")
     print()
     print(f"  {DM('Full citation:')}")
     print(f"  {DM('Rossi, L. (2025). Synthetic Triathlete Dataset for')}")
@@ -100,11 +121,11 @@ def main():
     print(B(C("  ▶ HOW ZENODO DATA WAS MAPPED TO OUR SCHEMA")))
     print(f"  {DIVIDER}")
     rows = [
-        ("heart_rate  (BPM)",    "resting_hr",               "Direct (clamped 40–185)"),
-        ("fatigue_index  (%)",   "hrv_baseline + hrv_range", "HRV inversion formula"),
-        ("glucose_level (mg/dL)","vo2max + resting_hr",      "Exercise physiology proxy"),
-        ("gps_telemetry",        "N/A in dataset",           "Synthetic jitter, Kona venue"),
-        ("injury_risk  (0–1)",   "stress_factor",            "Direct (clamped 0.01–0.99)"),
+        ("heart_rate  (BPM)", "resting_hr", "Direct (clamped 40–185)"),
+        ("fatigue_index  (%)", "hrv_baseline + hrv_range", "HRV inversion formula"),
+        ("glucose_level (mg/dL)", "vo2max + resting_hr", "Exercise physiology proxy"),
+        ("gps_telemetry", "N/A in dataset", "Synthetic jitter, Kona venue"),
+        ("injury_risk  (0–1)", "stress_factor", "Direct (clamped 0.01–0.99)"),
     ]
     print(f"  {'OUR FIELD':<24} {'ZENODO COLUMN':<26} {'METHOD'}")
     print(f"  {'─'*22:<24} {'─'*24:<26} {'─'*24}")
@@ -126,7 +147,7 @@ def main():
     print(f"  {R('✗ UNEXPECTED FAILURES'):<38}: {R(str(other_fail))}")
     print()
 
-    pass_pct  = passed / total * 100 if total else 0
+    pass_pct = passed / total * 100 if total else 0
     block_pct = gdpr_block / total * 100 if total else 0
     print(f"  Pass rate              : {G(f'{pass_pct:.0f}%')}")
     print(f"  GDPR block rate        : {Y(f'{block_pct:.0f}%')}  (5% pre-revoked intentionally)")
@@ -137,12 +158,16 @@ def main():
     print(B(C("  ▶ SECURITY GATES VERIFIED ON REAL DATA")))
     print(f"  {DIVIDER}")
     gates = [
-        (True, "AES-256-GCM encryption",         f"All {passed} records encrypted with unique random nonces"),
-        (True, "GCM authentication tag",          "All decrypted payloads matched originals exactly"),
-        (True, "GDPR Consent Gate",               f"{gdpr_block} athletes blocked BEFORE encryption"),
-        (True, "Schema Validation Gate",          "0 out-of-range values — dataset mapped cleanly"),
-        (True, "Nonce uniqueness (anti-replay)",  "No nonce collisions across all records"),
-        (True, "Audit trail",                     f"{total} rows written to audit_log.csv"),
+        (
+            True,
+            "AES-256-GCM encryption",
+            f"All {passed} records encrypted with unique random nonces",
+        ),
+        (True, "GCM authentication tag", "All decrypted payloads matched originals exactly"),
+        (True, "GDPR Consent Gate", f"{gdpr_block} athletes blocked BEFORE encryption"),
+        (True, "Schema Validation Gate", "0 out-of-range values — dataset mapped cleanly"),
+        (True, "Nonce uniqueness (anti-replay)", "No nonce collisions across all records"),
+        (True, "Audit trail", f"{total} rows written to audit_log.csv"),
     ]
     for ok, gate, detail in gates:
         icon = G("✔") if ok else R("✗")
@@ -155,13 +180,15 @@ def main():
     print(f"  Avg encryption latency    : {G(f'{avg_latency_ms:.3f} ms')} per record")
     print(f"  Estimated throughput      : {G(f'{throughput_rps:,} records/sec')}")
     print(f"  Ciphertext size overhead  : {G(f'+{ciphertext_overhead}%')} over plaintext")
-    print(f"  Overhead breakdown        : 12-byte nonce + 16-byte GCM auth tag / record")
+    print("  Overhead breakdown        : 12-byte nonce + 16-byte GCM auth tag / record")
     print()
     players, hz = 25, 1
     demand = players * hz
     headroom = throughput_rps // demand
     print(f"  {DM('Real-world capacity check:')}")
-    print(f"  {DM(f'  Premier League squad ({players} players × {hz} Hz) = {demand} rec/sec needed')}")
+    print(
+        f"  {DM(f'  Premier League squad ({players} players × {hz} Hz) = {demand} rec/sec needed')}"
+    )
     print(f"  {DM(f'  Our system handles {throughput_rps:,} rec/sec → {headroom:,}× headroom')}")
     print()
 
@@ -171,10 +198,10 @@ def main():
     if entries:
         first, last = entries[0], entries[-1]
         for label, e in [("First", first), ("Last ", last)]:
-            uid    = e["user_id"]
+            uid = e["user_id"]
             action = e["action"]
             status = G(e["status"]) if "SUCCESS" in e["status"] else Y(e["status"])
-            ts     = e["timestamp"]
+            ts = e["timestamp"]
             print(f"  {label}  {ts}  {uid:<20}  {action:<30}  {status}")
     print()
 
