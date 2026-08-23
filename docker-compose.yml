@@ -8,6 +8,7 @@ services:
     environment:
       ENVIRONMENT: production
       LOG_LEVEL: INFO
+      PYTHONPATH: /app
       # All three runtime data files are stored on the persistent named volume
       # so they survive container restarts and image upgrades.
       MOCK_DB_PATH: /data/mock_db.json
@@ -26,6 +27,38 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # One-shot benchmark runner
+  # ---------------------------------------------------------------------------
+  # Runs both evaluation scripts inside the same Docker image, writes JSON
+  # results to ./results/ on the host via a bind-mount.
+  #
+  # Usage:
+  #   docker compose build
+  #   docker compose run --rm benchmark
+  # ---------------------------------------------------------------------------
+  benchmark:
+    build: .
+    image: athlete-biometrics-cloud-server:latest
+    container_name: athlete-biometrics-benchmark
+    environment:
+      ENVIRONMENT: production
+      LOG_LEVEL: WARNING
+      PYTHONPATH: /app
+      CLOUD_API_KEY: ${CLOUD_API_KEY:-dev-only-insecure-change-me}
+      MAX_PACKET_AGE_SECONDS: 300
+      # Benchmark-specific isolated paths (inside the container only)
+      MOCK_DB_PATH: /tmp/bench_mock_db.json
+      AUDIT_LOG_PATH: /tmp/bench_audit_log.csv
+      LEDGER_FILE_PATH: /tmp/bench_ledger.json
+    volumes:
+      # Bind-mount ./results/ on the host so JSON output files are accessible
+      # after the container exits.
+      - ./results:/results
+    entrypoint: ["python", "run_benchmarks.py"]
+    profiles:
+      - benchmark
 
 volumes:
   biometrics_data:
