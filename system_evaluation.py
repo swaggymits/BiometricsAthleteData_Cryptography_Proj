@@ -44,6 +44,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+)
+
 # ---------------------------------------------------------------------------
 # Isolated test-environment file paths (never pollute the real DB)
 # ---------------------------------------------------------------------------
@@ -67,6 +73,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import server.cloud_server as _cs_mod  # noqa: E402
 import server.main_server as _ms  # noqa: E402
 from core.audit_logger import AuditLogger  # noqa: E402
+from core.ecdh_key_exchange import generate_ec_keypair, serialize_public_key  # noqa: E402
 from core.secure_gateway import SecureGateway  # noqa: E402
 from dataset.zenodo_dataset_loader import ZenodoDatasetLoader  # noqa: E402
 from edge.iot_device import IoTDeviceMock  # noqa: E402
@@ -518,6 +525,179 @@ def bench_gdpr_revoke_edge_case(
 
 
 # ===========================================================================
+# BENCHMARK 4 — ECDH Hybrid Encryption & Ledger Integrity
+# ===========================================================================
+
+
+def bench_ecdh_hybrid_and_ledger(
+    client: TestClient,
+    zenodo_payloads: List[Tuple[dict, dict]],
+) -> Dict[str, Any]:
+    print(f"\n  {B(C('▶ BENCHMARK 4 — ECDH Hybrid Encryption & Ledger Integrity'))}")
+    print(f"  {DIV}")
+
+    ATHLETE_ID = "ECDH-EDGE-ATHLETE-001"
+    DEVICE_ID = "ECDH-EDGE-IOT-001"
+    CLUB_ID = "CLUB-FC-EVAL"
+    N_HYBRID_ITERATIONS = 25
+
+    # Grant consent for the ECDH test athlete
+    r = client.post(
+        "/api/v1/athlete/consent",
+        json={"player_id": ATHLETE_ID, "privacy_toggle_consent": True},
+        headers={"X-API-Key": _api_key()},
+    )
+    assert r.status_code == 200, f"Consent grant failed: {r.text}"
+
+    # Generate the club's ephemeral NIST P-256 key pair and register the public key
+    club_private_key, club_public_key = generate_ec_keypair()
+    club_public_pem = serialize_public_key(club_public_key).decode("utf-8")
+    club_private_pem = club_private_key.private_bytes(
+        encoding=Encoding.PEM,
+        format=PrivateFormat.PKCS8,
+        encryption_algorithm=NoEncryption(),
+    ).decode("utf-8")
+
+    r_reg = client.post(
+        "/api/v1/keys/register-club",
+        json={
+            "club_id": CLUB_ID,
+            "player_id": ATHLETE_ID,
+            "club_public_key_pem": club_public_pem,
+        },
+        headers={"X-API-Key": _api_key()},
+    )
+    assert r_reg.status_code == 200, f"Club key registration failed: {r_reg.text}"
+    print(f"  Club key registered  : {G(CLUB_ID)} (NIST P-256)")
+
+    gateway = SecureGateway(gateway_id=GATEWAY_ID)
+
+    hybrid_success = 0
+    hybrid_fail = 0
+    enc_times: List[float] = []
+    dec_times: List[float] = []
+
+    for i in range(N_HYBRID_ITERATIONS):
+        payload, _ = zenodo_payloads[i % len(zenodo_payloads)]
+        t0 = time.perf_counter()
+        enc = gateway.encrypt_data_hybrid(
+            payload,
+            club_public_key_pem=club_public_pem.encode("utf-8"),
+            club_id=CLUB_ID,
+            device_id=DEVICE_ID,
+            player_id=ATHLETE_ID,
+        )
+        enc_times.append((time.perf_counter() - t0) * 1000)
+
+        body = {k: v for k, v in enc.items()}
+        _ms._rate_limit_store.clear()
+        r_ing = client.post(
+            "/api/v1/telemetry/ingest", json=body, headers={"X-API-Key": _api_key()}
+        )
+        if r_ing.status_code != 201:
+            hybrid_fail += 1
+            continue
+
+        t0 = time.perf_counter()
+        r_dec = client.post(
+            "/api/v1/telemetry/authorize-decrypt-hybrid",
+            json={"record": body, "club_private_key_pem": club_private_pem},
+            headers=_api_headers("TEAM_DOCTOR", ATHLETE_ID),
+        )
+        dec_times.append((time.perf_counter() - t0) * 1000)
+
+        if r_dec.status_code == 200:
+            hybrid_success += 1
+        else:
+            hybrid_fail += 1
+
+    print(
+        f"  Hybrid encrypt→ingest→decrypt : "
+        f"{G(str(hybrid_success))}/{N_HYBRID_ITERATIONS} succeeded"
+    )
+
+    # Revocation check: revoke the club, confirm subsequent hybrid decrypt is blocked
+    r_revoke = client.post(
+        "/api/v1/keys/revoke-club",
+        json={"club_id": CLUB_ID, "player_id": ATHLETE_ID},
+        headers={"X-API-Key": _api_key()},
+    )
+    assert r_revoke.status_code == 200
+
+    payload, _ = zenodo_payloads[0]
+    enc = gateway.encrypt_data_hybrid(
+        payload,
+        club_public_key_pem=club_public_pem.encode("utf-8"),
+        club_id=CLUB_ID,
+        device_id=DEVICE_ID,
+        player_id=ATHLETE_ID,
+    )
+    _ms._rate_limit_store.clear()
+    client.post("/api/v1/telemetry/ingest", json=enc, headers={"X-API-Key": _api_key()})
+    r_post_revoke = client.post(
+        "/api/v1/telemetry/authorize-decrypt-hybrid",
+        json={"record": enc, "club_private_key_pem": club_private_pem},
+        headers=_api_headers("TEAM_DOCTOR", ATHLETE_ID),
+    )
+    club_revocation_enforced = r_post_revoke.status_code == 403
+    print(
+        f"  Post-revocation decrypt       : "
+        f"HTTP {r_post_revoke.status_code} "
+        f"({G('blocked as expected') if club_revocation_enforced else R('NOT BLOCKED — FAIL')})"
+    )
+
+    # --- Ledger integrity: commit a transfer block, then verify tamper detection ---
+    r_transfer = client.post(
+        "/api/v1/transfer/process",
+        json={
+            "player_id": ATHLETE_ID,
+            "selling_club": "Club-Origin-Eval",
+            "buying_club": CLUB_ID,
+            "escrow_deposit_verified": True,
+        },
+        headers={"X-API-Key": _api_key(), "X-User-Role": "CLUB_ADMIN"},
+    )
+    assert r_transfer.status_code == 200, f"Transfer failed: {r_transfer.text}"
+
+    chain_valid_before = _ms.ledger.validate_chain()
+
+    # Tamper with the ledger file directly on disk, then re-validate.
+    with open(_EVAL_LEDGER, "r", encoding="utf-8") as fh:
+        chain_data = json.load(fh)
+    if chain_data:
+        chain_data[-1]["buying_club"] = "TAMPERED-BLACK-MARKET-CLUB"
+        with open(_EVAL_LEDGER, "w", encoding="utf-8") as fh:
+            json.dump(chain_data, fh, indent=2)
+    chain_valid_after_tamper = _ms.ledger.validate_chain()
+
+    tamper_detected = chain_valid_before is True and chain_valid_after_tamper is False
+    print(f"  Ledger chain (pre-tamper)     : {G('VALID') if chain_valid_before else R('INVALID')}")
+    print(
+        f"  Ledger chain (post-tamper)    : "
+        f"{R('INVALID (tamper detected)') if not chain_valid_after_tamper else G('VALID — FAIL')}"
+    )
+
+    hybrid_all_ok = hybrid_success == N_HYBRID_ITERATIONS
+
+    result = {
+        "hybrid_iterations": N_HYBRID_ITERATIONS,
+        "hybrid_success_count": hybrid_success,
+        "hybrid_fail_count": hybrid_fail,
+        "hybrid_encrypt_ms": _pstats(enc_times),
+        "hybrid_decrypt_ms": _pstats(dec_times) if dec_times else {},
+        "club_revocation_enforced": club_revocation_enforced,
+        "ledger_chain_valid_before_tamper": chain_valid_before,
+        "ledger_chain_valid_after_tamper": chain_valid_after_tamper,
+        "ledger_tamper_detected": tamper_detected,
+        "assertion_passed": hybrid_all_ok and club_revocation_enforced and tamper_detected,
+    }
+
+    verdict = G("✔ PASS") if result["assertion_passed"] else R("✗ FAIL")
+    print(f"\n  Assertion : {verdict}")
+    return result
+
+
+# ===========================================================================
 # Markdown table output
 # ===========================================================================
 
@@ -526,6 +706,7 @@ def render_markdown_table(
     latency: Dict[str, Any],
     throughput: Dict[str, Any],
     revoke: Dict[str, Any],
+    ecdh_ledger: Dict[str, Any],
 ) -> str:
     e = latency["e2e_total"]
     pe = latency["phase_encrypt"]
@@ -632,6 +813,42 @@ def render_markdown_table(
     )
     a("")
 
+    # ── Table 4: ECDH Hybrid Encryption & Ledger Integrity ───────────────
+    a("---")
+    a("")
+    a("### Table 4 — ECDH Hybrid Encryption & Hashed Ledger Integrity Validation")
+    a("")
+    eh = ecdh_ledger["hybrid_encrypt_ms"]
+    dh = ecdh_ledger["hybrid_decrypt_ms"]
+    verdict_md2 = "✅ **PASS**" if ecdh_ledger["assertion_passed"] else "❌ **FAIL**"
+    a("| Parameter | Value |")
+    a("|:----------|:------|")
+    a(f"| ECDH hybrid encrypt→ingest→decrypt iterations | {ecdh_ledger['hybrid_iterations']} |")
+    a(f"| Successful hybrid round-trips | **{ecdh_ledger['hybrid_success_count']}** |")
+    a(f"| Failed hybrid round-trips | {ecdh_ledger['hybrid_fail_count']} |")
+    a(f"| Avg ECDH+AES-256-GCM encryption time | {eh.get('mean_ms', 0):.3f} ms |")
+    a(f"| Avg ECDH+AES-256-GCM decryption time | {dh.get('mean_ms', 0):.3f} ms |")
+    a(
+        f"| Club-key revocation enforced post-revoke (HTTP 403) | {ecdh_ledger['club_revocation_enforced']} |"
+    )
+    a(f"| Ledger chain valid before tamper | {ecdh_ledger['ledger_chain_valid_before_tamper']} |")
+    a(
+        f"| Ledger chain valid after tamper (must be False) | {ecdh_ledger['ledger_chain_valid_after_tamper']} |"
+    )
+    a(f"| Ledger tamper detected | **{ecdh_ledger['ledger_tamper_detected']}** |")
+    a(f"| Assertion result | {verdict_md2} |")
+    a("")
+    a(
+        "> **ECDH + Ledger compliance**: Each hybrid packet is encrypted with a per-session "
+        "AES-256 key derived from an ephemeral NIST P-256 ECDH exchange + HKDF-SHA256, "
+        "bound to `(gateway_id, player_id, club_id)`. Revoking a club's key via "
+        "`POST /api/v1/keys/revoke-club` immediately blocks `authorize-decrypt-hybrid` for "
+        "that club. Separately, `LocalHashedLedger.validate_chain()` correctly flips from "
+        "valid to invalid the moment a committed transfer block is modified on disk, "
+        "confirming SHA-256 chain tamper-detection for the transfer/anti-black-market pipeline."
+    )
+    a("")
+
     return "\n".join(lines)
 
 
@@ -700,6 +917,10 @@ def main() -> None:
         client = _build_client()
         revoke_results = bench_gdpr_revoke_edge_case(client, aes_key, zenodo_payloads)
 
+        _cleanup()
+        client = _build_client()
+        ecdh_ledger_results = bench_ecdh_hybrid_and_ledger(client, zenodo_payloads)
+
     finally:
         _cleanup()
 
@@ -707,7 +928,9 @@ def main() -> None:
     print(f"\n{'=' * 66}")
     print("  MARKDOWN OUTPUT (copy-paste directly into thesis)")
     print(f"{'=' * 66}")
-    md = render_markdown_table(latency_results, throughput_results, revoke_results)
+    md = render_markdown_table(
+        latency_results, throughput_results, revoke_results, ecdh_ledger_results
+    )
     print(md)
 
     # --- JSON results ────────────────────────────────────────────────────────
@@ -715,6 +938,7 @@ def main() -> None:
         "benchmark_1_e2e_latency": latency_results,
         "benchmark_2_scalability_throughput": throughput_results,
         "benchmark_3_gdpr_revoke_edge_case": revoke_results,
+        "benchmark_4_ecdh_hybrid_and_ledger_integrity": ecdh_ledger_results,
     }
     results_path = "SYSTEM_EVALUATION_RESULTS.json"
     with open(results_path, "w", encoding="utf-8") as fh:
