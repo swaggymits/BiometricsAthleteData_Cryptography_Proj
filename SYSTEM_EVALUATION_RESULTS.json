@@ -2,36 +2,36 @@
   "benchmark_1_e2e_latency": {
     "n_iterations": 50,
     "e2e_total": {
-      "mean_ms": 16.603,
-      "median_ms": 15.903,
-      "p95_ms": 21.97,
-      "p99_ms": 33.118,
-      "min_ms": 10.129,
-      "max_ms": 33.118
+      "mean_ms": 3.193,
+      "median_ms": 3.125,
+      "p95_ms": 3.551,
+      "p99_ms": 6.505,
+      "min_ms": 2.603,
+      "max_ms": 6.505
     },
     "phase_encrypt": {
-      "mean_ms": 0.072,
-      "median_ms": 0.064,
-      "p95_ms": 0.12,
-      "p99_ms": 0.317,
-      "min_ms": 0.052,
-      "max_ms": 0.317
+      "mean_ms": 0.026,
+      "median_ms": 0.025,
+      "p95_ms": 0.033,
+      "p99_ms": 0.053,
+      "min_ms": 0.019,
+      "max_ms": 0.053
     },
     "phase_ingest": {
-      "mean_ms": 10.996,
-      "median_ms": 10.403,
-      "p95_ms": 16.638,
-      "p99_ms": 23.041,
-      "min_ms": 5.277,
-      "max_ms": 23.041
+      "mean_ms": 1.764,
+      "median_ms": 1.775,
+      "p95_ms": 2.128,
+      "p99_ms": 2.29,
+      "min_ms": 1.381,
+      "max_ms": 2.29
     },
     "phase_decrypt": {
-      "mean_ms": 5.535,
-      "median_ms": 5.244,
-      "p95_ms": 6.985,
-      "p99_ms": 12.599,
-      "min_ms": 4.709,
-      "max_ms": 12.599
+      "mean_ms": 1.403,
+      "median_ms": 1.324,
+      "p95_ms": 1.531,
+      "p99_ms": 4.162,
+      "min_ms": 1.197,
+      "max_ms": 4.162
     }
   },
   "benchmark_2_scalability_throughput": {
@@ -40,30 +40,30 @@
       "total_requests": 50,
       "successful_requests": 50,
       "failed_requests": 0,
-      "wall_time_s": 0.547,
-      "req_per_sec": 91.47,
-      "avg_ingest_ms": 101.0,
-      "p95_ingest_ms": 148.22
+      "wall_time_s": 0.078,
+      "req_per_sec": 643.75,
+      "avg_ingest_ms": 13.96,
+      "p95_ingest_ms": 20.75
     },
     "50": {
       "concurrent_devices": 50,
       "total_requests": 250,
       "successful_requests": 250,
       "failed_requests": 0,
-      "wall_time_s": 10.378,
-      "req_per_sec": 24.09,
-      "avg_ingest_ms": 1968.56,
-      "p95_ingest_ms": 2750.23
+      "wall_time_s": 0.684,
+      "req_per_sec": 365.58,
+      "avg_ingest_ms": 127.33,
+      "p95_ingest_ms": 157.16
     },
     "100": {
       "concurrent_devices": 100,
       "total_requests": 500,
       "successful_requests": 500,
       "failed_requests": 0,
-      "wall_time_s": 59.257,
-      "req_per_sec": 8.44,
-      "avg_ingest_ms": 11580.7,
-      "p95_ingest_ms": 15311.41
+      "wall_time_s": 2.795,
+      "req_per_sec": 178.91,
+      "avg_ingest_ms": 531.58,
+      "p95_ingest_ms": 700.68
     }
   },
   "benchmark_3_gdpr_revoke_edge_case": {
@@ -74,5 +74,31 @@
     "decrypt_200_count": 0,
     "assertion_passed": true,
     "assertion_detail": "All 10/10 post-revoke decrypt attempts returned HTTP 403 \u2014 GDPR gate is immediate and race-condition-safe."
+  },
+  "benchmark_4_ecdh_hybrid_and_ledger_integrity": {
+    "hybrid_iterations": 25,
+    "hybrid_success_count": 25,
+    "hybrid_fail_count": 0,
+    "hybrid_encrypt_ms": {
+      "mean_ms": 0.105,
+      "median_ms": 0.089,
+      "p95_ms": 0.117,
+      "p99_ms": 0.46,
+      "min_ms": 0.077,
+      "max_ms": 0.46
+    },
+    "hybrid_decrypt_ms": {
+      "mean_ms": 1.71,
+      "median_ms": 1.652,
+      "p95_ms": 1.949,
+      "p99_ms": 3.0,
+      "min_ms": 1.533,
+      "max_ms": 3.0
+    },
+    "club_revocation_enforced": true,
+    "ledger_chain_valid_before_tamper": true,
+    "ledger_chain_valid_after_tamper": false,
+    "ledger_tamper_detected": true,
+    "assertion_passed": true
   }
 }
