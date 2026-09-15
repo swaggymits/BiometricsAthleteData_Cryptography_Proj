@@ -1,0 +1,100 @@
+{
+  "generated_at_utc": "2026-09-15T08:18:52.378800+00:00",
+  "project": "Data Privacy in Elite Performance: Protecting Athlete Biometrics",
+  "summary": {
+    "total_tests": 7,
+    "passed": 7,
+    "failed": 0,
+    "all_passed": true,
+    "total_elapsed_ms": 4.8936
+  },
+  "test_results": [
+    {
+      "test_name": "Biometric Data Schema Validation",
+      "category": "Data Schema",
+      "status": "PASS",
+      "elapsed_ms": 0.0101,
+      "details": {
+        "validated_payload": {
+          "heart_rate": 172,
+          "fatigue_index": 91.42,
+          "glucose_level": 88.5,
+          "gps_telemetry": {
+            "lat": 37.9838,
+            "lon": 23.7275,
+            "speed_kmh": 27.6
+          },
+          "injury_risk": 0.63
+        },
+        "out_of_range_payload_correctly_rejected": true
+      }
+    },
+    {
+      "test_name": "Symmetric AES-256-GCM Encryption (+AAD +Nonce Uniqueness)",
+      "category": "Symmetric Cryptography",
+      "status": "PASS",
+      "elapsed_ms": 1.104,
+      "details": {
+        "nonce_uniqueness_verified": true,
+        "no_plaintext_leak_verified": true,
+        "round_trip_decryption_verified": true,
+        "aad_context_binding_enforced": true,
+        "ciphertext_tamper_detected": true
+      }
+    },
+    {
+      "test_name": "Replay / Freshness Protection",
+      "category": "Replay Protection",
+      "status": "PASS",
+      "elapsed_ms": 0.6634,
+      "details": {
+        "stale_packet_rejected": true,
+        "fresh_packet_accepted": true
+      }
+    },
+    {
+      "test_name": "ECDH (P-256) Key Exchange + HKDF-SHA256",
+      "category": "Asymmetric Cryptography",
+      "status": "PASS",
+      "elapsed_ms": 0.4586,
+      "details": {
+        "shared_secret_agreement_verified": true,
+        "session_key_length_bytes": 32,
+        "context_binding_differentiates_sessions": true
+      }
+    },
+    {
+      "test_name": "Hybrid ECDH + AES-256-GCM (+ Multi-Tenant Isolation)",
+      "category": "Hybrid Cryptography",
+      "status": "PASS",
+      "elapsed_ms": 0.3648,
+      "details": {
+        "hybrid_round_trip_verified": true,
+        "no_plaintext_leak_verified": true,
+        "multi_tenant_isolation_enforced": true
+      }
+    },
+    {
+      "test_name": "GDPR-Style Audit Logging",
+      "category": "Audit & Compliance",
+      "status": "PASS",
+      "elapsed_ms": 1.5135,
+      "details": {
+        "audit_log_file_created": true,
+        "success_row_logged": true,
+        "denied_row_logged": true,
+        "row_count": 2
+      }
+    },
+    {
+      "test_name": "SHA-256 Hashed Ledger (+ Tamper Detection)",
+      "category": "Ledger / Blockchain",
+      "status": "PASS",
+      "elapsed_ms": 0.7792,
+      "details": {
+        "chain_valid_before_tamper": true,
+        "tamper_detected": true
+      }
+    }
+  ]
+}
