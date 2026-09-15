@@ -1,0 +1,93 @@
+{
+  "generated_at_utc": "2026-09-15T08:18:52.379002+00:00",
+  "note": "All ciphertext/nonce/key fields below were generated live during this run. No plaintext biometric values appear in any ciphertext field (verified programmatically).",
+  "artifacts": {
+    "symmetric_aes_gcm": {
+      "gateway_id": "GW-VERIFY-01",
+      "packet_1": {
+        "gateway_id": "GW-VERIFY-01",
+        "device_id": "IOT-VERIFY-01",
+        "player_id": "PLAYER-VERIFY-01",
+        "sent_at": "2026-09-15T08:18:52Z",
+        "nonce": "f76fad96058d6910bbc9c167",
+        "ciphertext": "f5f7d5328cd0a9a6fd2d59fc8de318d946c34e58e238639bc81b49ca56daa85b9176345db6ef789400d8a8a5ac0b34d7e8ece2427074181ae3ba49b97abdf8309446c7ac0167f9026d2699df0542745c46d4c143db40906b34efcac4c20915c9167f2c4547fc6620fd877ccb9321eb780c559f0b775b0fa4222dc64a3884438600a991c93b601a43768a5b3e7ee108bd39e5fd876da3e833caaed17f96927559abd9b8da190d2681fa8ebb8d95"
+      },
+      "packet_2": {
+        "gateway_id": "GW-VERIFY-01",
+        "device_id": "IOT-VERIFY-01",
+        "player_id": "PLAYER-VERIFY-01",
+        "sent_at": "2026-09-15T08:18:52Z",
+        "nonce": "4ce33eb17f3dfcea9294ce1d",
+        "ciphertext": "93171afd52b82a44b59cf6dd8e1ae1cf15c5d3cb92578df9970788f18db5a32e8c7a99a78735d2b792711b9a011632f7d13dd74d88ec5bfb9a4bd6339462faa4cc7236cc5e08bfbf8cd6d406f94b4d18fd72cb6bb3c35b6bfbb218a54f0eea2337be2a4b00e87218221f890791854473fac856326e6501f53355a338cbf15e3bc4f51dd328fc3efcc2dfa3b80af208a16756e3d00c6d857d92504fdf96c0da09e64e7975d71fe1f70bf4267f44"
+      },
+      "decrypted_matches_original": true
+    },
+    "ecdh_key_exchange": {
+      "public_key_pem_party_a": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEgCm6k/EfGlMUb7apMjUPRd/qSrbS\nnzlV/dwWc+Jn8mfMEur5ufkLt64bZRX/RBErzGROFsVGqjA8rS1B7UDs/A==\n-----END PUBLIC KEY-----\n",
+      "shared_session_key_hex": "e1775a6cd02461f653a1290fa202acec107020d6cdf767a6267582f8d30a2d93",
+      "session_info": "GW-01|PLAYER-01|FC-A"
+    },
+    "hybrid_ecdh_aes_gcm": {
+      "gateway_id": "GW-HYBRID-VERIFY",
+      "gateway_ephemeral_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEArL2JKp2Tm3v5LaXBfoQXahoEXBb\n8erC3cSKbbvH1d0F87jonbRrZB/Lwcib+e4WgCiQva4g4cLSIZInhogc1A==\n-----END PUBLIC KEY-----\n",
+      "encrypted_packet_for_club_a": {
+        "gateway_id": "GW-HYBRID-VERIFY",
+        "device_id": "IOT-HYBRID-01",
+        "player_id": "PLAYER-HYBRID-01",
+        "sent_at": "2026-09-15T08:18:52Z",
+        "nonce": "ce81af83ca42948be35585f4",
+        "ciphertext": "95392f78a6c9dc051f95df1e54209e4b61e65c2c952ca7df53e215c36811ed2bbf108b1214144c7abb5320b7c0e9281b2b07cb96beef5d1002f3b443bc635f74617184f98669e5442dd7731dcec152d495cfda21b0864fc7e8d4e7d2402f029f8b5227baca59df7686da8e7c4dc8f8e9731209b02cd91d5d4fc3ad2f0f25d7467f87f65bba6d2c71fcd5a983ef7c5688eaca09f62d26e9ba237bc7a751277e7c1b73ac08cb4f2ae6b37498cb8d",
+        "ephemeral_public_key_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEArL2JKp2Tm3v5LaXBfoQXahoEXBb\n8erC3cSKbbvH1d0F87jonbRrZB/Lwcib+e4WgCiQva4g4cLSIZInhogc1A==\n-----END PUBLIC KEY-----\n",
+        "club_id": "FC-CLUB-A"
+      },
+      "club_a_decryption_successful": true,
+      "club_b_decryption_blocked_multi_tenant_isolation": true
+    },
+    "audit_log_sample_rows": [
+      {
+        "timestamp": "2026-09-15T08:18:52.377Z",
+        "user_id": "TEAM_DOCTOR_01",
+        "user_role": "TEAM_DOCTOR",
+        "player_id": "PLAYER-HYBRID-01",
+        "action": "VIEW_BIOMETRIC_DATA",
+        "status": "SUCCESS_200",
+        "ip_address": "127.0.0.1"
+      },
+      {
+        "timestamp": "2026-09-15T08:18:52.377Z",
+        "user_id": "EXTERNAL_COMPANY_99",
+        "user_role": "EXTERNAL_COMPANY",
+        "player_id": "PLAYER-HYBRID-01",
+        "action": "VIEW_BIOMETRIC_DATA",
+        "status": "DENIED_RBAC_403",
+        "ip_address": "127.0.0.1"
+      }
+    ],
+    "hashed_ledger": {
+      "block_1": {
+        "index": 1,
+        "timestamp": "2026-09-15T08:18:52.378Z",
+        "player_id": "PLAYER-HYBRID-01",
+        "selling_club": "FC-SELLING",
+        "buying_club": "FC-CLUB-A",
+        "escrow_deposit_verified": true,
+        "encrypted_payload_hash": "sha256-placeholder-of-encrypted-packet",
+        "previous_hash": "d7f746b4b317152009e503007cad1b9470d4b1f90bd5ae2247c5ef8f87dc77e8",
+        "hash": "82d40b6a863aec209c84b8aa0759feaeda8973014a11ae64c2a1c30391933430"
+      },
+      "block_2": {
+        "index": 2,
+        "timestamp": "2026-09-15T08:18:52.378Z",
+        "player_id": "PLAYER-HYBRID-02",
+        "selling_club": "FC-CLUB-A",
+        "buying_club": "FC-CLUB-B",
+        "escrow_deposit_verified": true,
+        "encrypted_payload_hash": "sha256-placeholder-2",
+        "previous_hash": "82d40b6a863aec209c84b8aa0759feaeda8973014a11ae64c2a1c30391933430",
+        "hash": "6d8d172445b98211ee3351d215c511e0035f2f1fc83dc4297174c6f3e6156566"
+      },
+      "chain_valid_before_tamper": true,
+      "chain_valid_after_tamper": false
+    }
+  }
+}
