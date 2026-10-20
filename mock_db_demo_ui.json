@@ -1,0 +1,11 @@
+[
+  {
+    "gateway_id": "GW-DEMO-01",
+    "device_id": "IOT-WEARABLE-01",
+    "player_id": "PLAYER-001",
+    "sent_at": "2026-10-08T19:47:30Z",
+    "nonce": "11200c17cb385c24571bf09a",
+    "ciphertext": "56556ce45476b3d8bef53201ca4b7c8fdb68a9beefd50b43fdabdc4ecee52bb5970e5ebaf7f1b64899fa88f58a976720b0d1c82233ac28336f9864b7a32e389525b8727931e7ffe15a5ce8f9eaa6f2525a5ccca93bb5cbde71fc4c7ad781c90cbd76760d052569629a46cf5075a61d0ddcab0217519949c2abdec54c8d87806f52b6f9e0b75bf68473418531a35600b928055d267aac9b9e8643b1b9c25a080e7b5115c5495d0e767b4961ad",
+    "received_at": "2026-10-08T19:47:30Z"
+  }
+]
