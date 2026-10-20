@@ -1,0 +1,13 @@
+[
+  {
+    "index": 0,
+    "timestamp": "2026-10-08T19:47:12.283Z",
+    "player_id": "GENESIS",
+    "selling_club": "GENESIS",
+    "buying_club": "GENESIS",
+    "escrow_deposit_verified": false,
+    "encrypted_payload_hash": "0",
+    "previous_hash": "0",
+    "hash": "392dee9e02a04f5e5a60edc063864a72d26df9337c091ee4c4b4f94e1dd0ca53"
+  }
+]

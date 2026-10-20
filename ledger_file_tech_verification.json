@@ -1,0 +1,35 @@
+[
+  {
+    "index": 0,
+    "timestamp": "2026-09-23T09:12:23.964Z",
+    "player_id": "GENESIS",
+    "selling_club": "GENESIS",
+    "buying_club": "GENESIS",
+    "escrow_deposit_verified": false,
+    "encrypted_payload_hash": "0",
+    "previous_hash": "0",
+    "hash": "4c934436199e37068d5c3cfe38f0022a96ded9e6696f94d48925ff866dad7eb3"
+  },
+  {
+    "index": 1,
+    "timestamp": "2026-09-23T09:12:23.964Z",
+    "player_id": "PLAYER-HYBRID-01",
+    "selling_club": "FC-SELLING",
+    "buying_club": "FC-ATTACKER",
+    "escrow_deposit_verified": true,
+    "encrypted_payload_hash": "sha256-placeholder-of-encrypted-packet",
+    "previous_hash": "4c934436199e37068d5c3cfe38f0022a96ded9e6696f94d48925ff866dad7eb3",
+    "hash": "643c6b9d9a2af063b205399fac983a4834282939addaaf84eee599222183042e"
+  },
+  {
+    "index": 2,
+    "timestamp": "2026-09-23T09:12:23.965Z",
+    "player_id": "PLAYER-HYBRID-02",
+    "selling_club": "FC-CLUB-A",
+    "buying_club": "FC-CLUB-B",
+    "escrow_deposit_verified": true,
+    "encrypted_payload_hash": "sha256-placeholder-2",
+    "previous_hash": "643c6b9d9a2af063b205399fac983a4834282939addaaf84eee599222183042e",
+    "hash": "5548ea7a40d4899715b6a02f4b4e4d96ee3b2fe6d441b8f654723db402a1d366"
+  }
+]
